@@ -1,5 +1,7 @@
 # MiniCode
 
+English | [简体中文](README.zh-CN.md) | [한국어](README.ko.md) | [日本語](README.ja.md)
+
 MiniCode is an open-source coding agent.
 
 It focuses on making AI coding more efficient. A coding agent burns a large
