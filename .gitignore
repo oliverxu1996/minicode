@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+
+# TypeScript incremental build state
+*.tsbuildinfo
+
+# Test and coverage output
+coverage/
+
+# Environment files — .env.example stays tracked as a template
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
+
+# Claude Code local state.
+# CLAUDE.md is deliberately NOT ignored: it is project-level documentation
+# meant to be committed and shared. Only local/personal state is excluded.
+.claude/
+CLAUDE.local.md
