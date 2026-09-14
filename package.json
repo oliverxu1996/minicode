@@ -1,0 +1,7 @@
+{
+  "name": "minicode",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "minicode",
+    },
+    "packages/agent": {
+      "name": "@minicode/agent",
+      "version": "0.1.0",
+    },
+  },
+  "packages": {
+    "@minicode/agent": ["@minicode/agent@workspace:packages/agent"],
+  }
+}
