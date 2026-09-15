@@ -26,6 +26,11 @@ logs/
 *.temp
 tmp/
 
+# Local working notes.
+# Anchored to the repository root: only the root-level docs/ directory is
+# local scratch, so a package-level docs/ directory would remain trackable.
+/docs/
+
 # Editor and OS noise
 .DS_Store
 Thumbs.db
