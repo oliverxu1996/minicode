@@ -46,6 +46,9 @@ Desktop.ini
 .claude/
 CLAUDE.local.md
 
+# Runtime tool-output spill (bash/truncate artifacts from agent runs)
+.tool-output/
+
 # Internal files that must never be committed.
 # Word documents and internal tooling scripts are not part of the product;
 # these rules keep them out of the tree and out of future history.
