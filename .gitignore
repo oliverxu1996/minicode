@@ -29,7 +29,12 @@ tmp/
 # Local working notes.
 # Anchored to the repository root: only the root-level docs/ directory is
 # local scratch, so a package-level docs/ directory would remain trackable.
-/docs/
+# Engineering documents are maintained product documentation and are
+# deliberately tracked, so docs/engineering/ is re-included here. The pattern
+# ignores the contents rather than the directory itself, because git cannot
+# re-include a path whose parent directory is excluded.
+/docs/*
+!/docs/engineering/
 
 # Editor and OS noise
 .DS_Store

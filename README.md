@@ -50,9 +50,25 @@ MiniCode is intentionally focused on software development. It is not trying to b
 
 ## Quick start
 
-**Prerequisite:** [Bun](https://bun.sh) must be installed and available on PATH.
+Two ways to install MiniCode. Both run the same agent.
 
-Install MiniCode globally and start it in your project:
+### Standalone binary (Linux x86_64)
+
+Download `minicode-linux-x64` from the
+[releases page](https://github.com/oliverxu1996/minicode/releases), then:
+
+```sh
+chmod +x minicode-linux-x64
+cd ~/my-project
+/path/to/minicode-linux-x64
+```
+
+The binary is self-contained: no Bun or Node installation is required. Linux
+x86_64 is the only platform with a prebuilt binary today.
+
+### npm
+
+**Prerequisite:** [Bun](https://bun.sh) must be installed and available on PATH.
 
 ```sh
 npm install -g minicode
@@ -150,18 +166,18 @@ For non-interactive use — scripts, CI, code review pipelines:
 
 ```sh
 # run one task and print the final response
-bun ./packages/agent/src/tui/main.ts -p "explain what this project does" /path/to/project
+minicode -p "explain what this project does" /path/to/project
 
 # emit every runtime event as JSON lines (for tooling)
-bun ./packages/agent/src/tui/main.ts --mode json -p "find all TODO comments" /path/to/project
+minicode --mode json -p "find all TODO comments" /path/to/project
 
 # continue the most recent session in this workspace
-bun ./packages/agent/src/tui/main.ts -c -p "now fix the issue you found" /path/to/project
+minicode -c -p "now fix the issue you found" /path/to/project
 ```
 
 ## Status
 
-**Status: early experimental development.** MiniCode is under active development and is not yet a public release. The current baseline is v0.1.0 — see [CHANGELOG.md](CHANGELOG.md) for what is included.
+**Status: early experimental development.** MiniCode is under active development. The current version is v0.1.0 — see [CHANGELOG.md](CHANGELOG.md) for what is included.
 
 ## License
 

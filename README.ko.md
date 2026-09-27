@@ -50,9 +50,23 @@ MiniCode는 소프트웨어 개발에 집중합니다. 범용 AI 어시스턴트
 
 ## 빠른 시작
 
-**전제 조건:** [Bun](https://bun.sh)이 설치되어 PATH에서 사용 가능해야 합니다.
+설치 방법은 두 가지이며, 어느 쪽이든 동일한 에이전트가 실행됩니다.
 
-MiniCode를 전역 설치하고 프로젝트에서 시작합니다:
+### 독립 실행 바이너리 (Linux x86_64)
+
+[릴리스 페이지](https://github.com/oliverxu1996/minicode/releases)에서 `minicode-linux-x64`를 내려받습니다:
+
+```sh
+chmod +x minicode-linux-x64
+cd ~/my-project
+/path/to/minicode-linux-x64
+```
+
+이 바이너리는 자체 완결형이라 Bun이나 Node를 설치할 필요가 없습니다. 현재 사전 빌드된 바이너리를 제공하는 플랫폼은 Linux x86_64뿐입니다.
+
+### npm
+
+**전제 조건:** [Bun](https://bun.sh)이 설치되어 PATH에서 사용 가능해야 합니다.
 
 ```sh
 npm install -g minicode
@@ -150,18 +164,18 @@ MiniCode는 저장소 루트의 지시 파일을 읽어 작업 시작 전에 프
 
 ```sh
 # 작업 하나를 실행하고 최종 응답 출력
-bun ./packages/agent/src/tui/main.ts -p "이 프로젝트가 하는 일을 설명해 줘" /path/to/project
+minicode -p "이 프로젝트가 하는 일을 설명해 줘" /path/to/project
 
 # 모든 런타임 이벤트를 JSON 라인으로 출력 (도구 연동용)
-bun ./packages/agent/src/tui/main.ts --mode json -p "모든 TODO 주석을 찾아 줘" /path/to/project
+minicode --mode json -p "모든 TODO 주석을 찾아 줘" /path/to/project
 
 # 이 워크스페이스의 최근 세션 계속하기
-bun ./packages/agent/src/tui/main.ts -c -p "발견한 문제를 수정해 줘" /path/to/project
+minicode -c -p "발견한 문제를 수정해 줘" /path/to/project
 ```
 
 ## 현재 상태
 
-**상태: 초기 실험적 개발 단계.** MiniCode는 현재 활발히 개발 중이며 아직 공개 릴리스는 아닙니다. 현재 베이스라인은 v0.1.0입니다. 포함된 내용은 [CHANGELOG.md](CHANGELOG.md)에서 확인하세요.
+**상태: 초기 실험적 개발 단계.** MiniCode는 현재 활발히 개발 중입니다. 현재 버전은 v0.1.0입니다. 포함된 내용은 [CHANGELOG.md](CHANGELOG.md)에서 확인하세요.
 
 ## 라이선스
 

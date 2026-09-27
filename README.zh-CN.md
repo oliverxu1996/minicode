@@ -50,9 +50,23 @@ MiniCode 刻意专注于软件开发，它并不打算成为一个通用的 AI �
 
 ## 快速开始
 
-**前提条件：** [Bun](https://bun.sh) 必须已安装并在 PATH 中可用。
+有两种安装方式，运行的是同一个 agent。
 
-全局安装 MiniCode，然后在你的项目中启动：
+### 独立二进制（Linux x86_64）
+
+从[发布页面](https://github.com/oliverxu1996/minicode/releases)下载 `minicode-linux-x64`，然后：
+
+```sh
+chmod +x minicode-linux-x64
+cd ~/my-project
+/path/to/minicode-linux-x64
+```
+
+该二进制是自包含的：不需要安装 Bun 或 Node。目前只有 Linux x86_64 提供预编译二进制。
+
+### npm
+
+**前提条件：** [Bun](https://bun.sh) 必须已安装并在 PATH 中可用。
 
 ```sh
 npm install -g minicode
@@ -150,18 +164,18 @@ MiniCode 会读取仓库根目录下的指令文件，在开始工作之前了�
 
 ```sh
 # 运行一个任务并打印最终回复
-bun ./packages/agent/src/tui/main.ts -p "解释这个项目是做什么的" /path/to/project
+minicode -p "解释这个项目是做什么的" /path/to/project
 
 # 将每个运行时事件输出为 JSON 行（供工具处理）
-bun ./packages/agent/src/tui/main.ts --mode json -p "找出所有 TODO 注释" /path/to/project
+minicode --mode json -p "找出所有 TODO 注释" /path/to/project
 
 # 继续该工作区中最近的会话
-bun ./packages/agent/src/tui/main.ts -c -p "现在修复你发现的问题" /path/to/project
+minicode -c -p "现在修复你发现的问题" /path/to/project
 ```
 
 ## 当前状态
 
-**状态：早期实验开发阶段。** MiniCode 仍在积极开发中，尚未正式发布。当前基线版本为 v0.1.0——包含的内容见 [CHANGELOG.md](CHANGELOG.md)。
+**状态：早期实验开发阶段。** MiniCode 仍在积极开发中。当前版本为 v0.1.0——包含的内容见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可证
 

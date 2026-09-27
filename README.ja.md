@@ -50,9 +50,23 @@ MiniCode はソフトウェア開発に集中的に取り組むためのツー�
 
 ## クイックスタート
 
-**前提条件:** [Bun](https://bun.sh) がインストール済みで PATH から利用できること。
+インストール方法は 2 つあり、どちらも同じエージェントが動作します。
 
-MiniCode をグローバルインストールし、プロジェクト内で起動します:
+### スタンドアロンバイナリ（Linux x86_64）
+
+[リリースページ](https://github.com/oliverxu1996/minicode/releases) から `minicode-linux-x64` をダウンロードします:
+
+```sh
+chmod +x minicode-linux-x64
+cd ~/my-project
+/path/to/minicode-linux-x64
+```
+
+このバイナリは自己完結型で、Bun も Node もインストール不要です。現時点でビルド済みバイナリを提供しているのは Linux x86_64 のみです。
+
+### npm
+
+**前提条件:** [Bun](https://bun.sh) がインストール済みで PATH から利用できること。
 
 ```sh
 npm install -g minicode
@@ -150,18 +164,18 @@ MiniCode は、リポジトリのルートにある指示ファイルを読み�
 
 ```sh
 # タスクを 1 つ実行し、最終的な応答を表示
-bun ./packages/agent/src/tui/main.ts -p "このプロジェクトが何をしているか説明して" /path/to/project
+minicode -p "このプロジェクトが何をしているか説明して" /path/to/project
 
 # すべてのランタイムイベントを JSON 行として出力（ツール連携用）
-bun ./packages/agent/src/tui/main.ts --mode json -p "すべての TODO コメントを探して" /path/to/project
+minicode --mode json -p "すべての TODO コメントを探して" /path/to/project
 
 # このワークスペースの最新セッションを続行
-bun ./packages/agent/src/tui/main.ts -c -p "見つけた問題を修正して" /path/to/project
+minicode -c -p "見つけた問題を修正して" /path/to/project
 ```
 
 ## 現在の状況
 
-**状況: 初期の実験的開発段階。** MiniCode は現在活発に開発中であり、まだ公開リリースではありません。現在のベースラインは v0.1.0 です。含まれる内容は [CHANGELOG.md](CHANGELOG.md) を参照してください。
+**状況: 初期の実験的開発段階。** MiniCode は現在活発に開発中です。現在のバージョンは v0.1.0 です。含まれる内容は [CHANGELOG.md](CHANGELOG.md) を参照してください。
 
 ## ライセンス
 
