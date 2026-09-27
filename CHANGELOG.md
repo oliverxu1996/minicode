@@ -23,3 +23,7 @@ All notable changes to MiniCode will be documented here.
   crash recovery, reactive compaction against the 75/25 context budget,
   doom-loop/max-iteration guards, and the coding toolset (read, write,
   edit, grep, find, ls, bash) with output truncation and history pruning.
+- Terminal UI: vendored terminal UI framework (`packages/tui`, MIT) with a
+  MiniCode main-screen chat adapter — editor input, working spinner,
+  tool call/result rendering, markdown assistant responses, abort, and
+  session replay over the existing `RunEvent` runtime events.

@@ -15,6 +15,9 @@ export interface ToolExecutionContext {
   readonly toolCallId?: string
   /** Session workspace root; relative tool paths resolve against it. */
   readonly cwd?: string
+  /** The run's cancellation signal. Long-running tools should honor it so
+   *  an aborted run does not wait for a hanging command. */
+  readonly signal?: AbortSignal
 }
 
 /**

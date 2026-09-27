@@ -63,6 +63,7 @@ export class AgentLoop {
         executeTool(session, this.tools, msg, name, toolCallId, input, {
           iteration: 0,
           reissue: o?.reissue,
+          signal: opts.signal,
           onEvent: emit,
         }),
     })
@@ -152,6 +153,7 @@ export class AgentLoop {
         if (signal?.aborted) return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
         await executeTool(this.session, this.tools, assistantMsg, call.toolName, call.toolCallId, call.input as Record<string, unknown>, {
           iteration: iterations,
+          signal,
           onEvent: emit,
         })
 

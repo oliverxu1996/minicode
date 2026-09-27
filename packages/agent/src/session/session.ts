@@ -30,7 +30,7 @@ export interface RecoverHooks {
     name: string,
     toolCallId: string,
     input: Record<string, unknown>,
-    opts?: { reissue?: boolean },
+    opts?: { reissue?: boolean; signal?: AbortSignal },
   ) => Promise<void>
 }
 

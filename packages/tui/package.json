@@ -1,5 +1,5 @@
 {
-  "name": "@minicode/agent",
+  "name": "@minicode/tui",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,8 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@minicode/model": "workspace:*",
-    "@minicode/tui": "workspace:*",
-    "diff": "9.0.0"
+    "get-east-asian-width": "1.6.0",
+    "marked": "18.0.11"
   }
 }

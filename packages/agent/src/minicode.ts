@@ -85,6 +85,13 @@ export class MiniCode {
     return model
   }
 
+  /** Display label of the model a run would use right now. */
+  async currentModelLabel(): Promise<string> {
+    if (this.modelOverride !== undefined) return this.modelOverride.id
+    const manager = await ModelManager.load()
+    return manager.active()?.id ?? "no model"
+  }
+
   private track(session: Session): void {
     this.sessions.set(session.id, session)
     session.onCheckpoint(async () => {

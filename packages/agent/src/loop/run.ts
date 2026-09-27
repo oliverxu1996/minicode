@@ -97,7 +97,12 @@ export async function executeTool(
   name: string,
   toolCallId: string,
   input: Record<string, unknown>,
-  opts: { iteration: number; reissue?: boolean; onEvent?: (event: RunEvent) => void } = { iteration: 0 },
+  opts: {
+    iteration: number
+    reissue?: boolean
+    signal?: AbortSignal
+    onEvent?: (event: RunEvent) => void
+  } = { iteration: 0 },
 ): Promise<void> {
   const emit = opts.onEvent ?? (() => {})
 
@@ -124,7 +129,7 @@ export async function executeTool(
     output = { ok: false, error: `unknown tool ${name}` }
   } else {
     try {
-      output = await tool.execute(input, { toolCallId, cwd: session.cwd })
+      output = await tool.execute(input, { toolCallId, cwd: session.cwd, signal: opts.signal })
     } catch (err) {
       output = { ok: false, error: err instanceof Error ? err.message : String(err) }
     }

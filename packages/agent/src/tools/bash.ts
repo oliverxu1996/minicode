@@ -47,8 +47,13 @@ export const bashTool: Tool = {
     }
 
     const effectiveTimeout = Math.min(Math.max(timeout ?? DEFAULT_TIMEOUT, 1), MAX_TIMEOUT)
-    const controller = new AbortController()
-    const timeoutHandle = setTimeout(() => controller.abort(), effectiveTimeout)
+    const timeoutController = new AbortController()
+    const timeoutHandle = setTimeout(() => timeoutController.abort(), effectiveTimeout)
+    // The run's cancellation signal also kills the command: aborting a run
+    // must not wait out a long-running child.
+    const signal = ctx?.signal === undefined
+      ? timeoutController.signal
+      : AbortSignal.any([timeoutController.signal, ctx.signal])
 
     let result: { stdout: string; stderr: string; exitCode: number }
     try {
@@ -56,7 +61,7 @@ export const bashTool: Tool = {
         stdout: "pipe",
         stderr: "pipe",
         cwd,
-        signal: controller.signal,
+        signal,
         env: { ...process.env },
       })
       const [stdout, stderr] = await Promise.all([
@@ -67,18 +72,21 @@ export const bashTool: Tool = {
       result = { stdout, stderr, exitCode }
     } catch (err) {
       clearTimeout(timeoutHandle)
-      if (controller.signal.aborted) {
+      if (timeoutController.signal.aborted) {
         return {
           ok: false,
           error: `Command timed out after ${formatDuration(effectiveTimeout)} and was terminated.`,
         }
+      }
+      if (ctx?.signal?.aborted) {
+        return { ok: false, error: "Command cancelled: the run was aborted." }
       }
       const message = err instanceof Error ? err.message : String(err)
       return { ok: false, error: `Command execution failed: ${message}` }
     }
     clearTimeout(timeoutHandle)
 
-    if (controller.signal.aborted) {
+    if (timeoutController.signal.aborted) {
       return {
         ok: false,
         error: `Command timed out after ${formatDuration(effectiveTimeout)}.\nPartial output:\n${truncate(result.stdout, result.stderr)}`,
