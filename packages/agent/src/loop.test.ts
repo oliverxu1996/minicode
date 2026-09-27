@@ -52,6 +52,29 @@ describe("AgentLoop control flow (V2)", () => {
     cleanup()
   })
 
+  test("text deltas stream to the UI as assistant_delta events (G1)", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      {
+        content: "first response",
+        toolCalls: [{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }],
+        finishReason: "tool_call",
+      },
+      textResponse("final answer"),
+    ]))
+    const session = agent.createSession(dir)
+    const deltas: string[] = []
+
+    await agent.run(session, "stream it", {
+      onEvent: e => {
+        if (e.type === "assistant_delta") deltas.push(e.text)
+      },
+    })
+
+    // One delta per scripted text response, in order.
+    expect(deltas).toEqual(["first response", "final answer"])
+    cleanup()
+  })
+
   test("tool failure is data: the model continues and repairs (AC4/AC5)", async () => {
     const { agent, dir, cleanup } = agentFor(new FakeModel([
       toolCallResponse([{ toolCallId: "call_1", toolName: "read", input: { filePath: "missing.txt" } }]),
@@ -185,16 +208,55 @@ describe("AgentLoop control flow (V2)", () => {
     cleanup()
   })
 
+  test("rate-limited calls auto-retry with backoff and then succeed (auto-retry)", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      { error: new ModelError("rate_limited", "rate_limited: provider busy (1305)") },
+      { error: new ModelError("rate_limited", "rate_limited: provider busy (1305)") },
+      textResponse("recovered after backoff"),
+    ]))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    const result = await agent.run(session, "retry me", { onEvent: e => events.push(e), autoRetryDelayMs: 10 })
+
+    expect(result.finishReason).toBe("stop")
+    const retries = events.filter(e => e.type === "auto_retry")
+    expect(retries).toHaveLength(2)
+    expect(retries[0]).toMatchObject({ attempt: 1, maxAttempts: 3 })
+    cleanup()
+  })
+
+  test("auto-retry gives up after the cap and reports the error (AC9)", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      { error: new ModelError("rate_limited", "still limited 1") },
+      { error: new ModelError("rate_limited", "still limited 2") },
+      { error: new ModelError("rate_limited", "still limited 3") },
+      { error: new ModelError("rate_limited", "still limited 4") },
+    ]))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    const result = await agent.run(session, "doomed", {
+      onEvent: e => events.push(e),
+      autoRetryDelayMs: 10,
+    })
+
+    expect(result.finishReason).toBe("error")
+    expect(result.error).toContain("still limited 4")
+    expect(events.filter(e => e.type === "auto_retry")).toHaveLength(3)
+    cleanup()
+  })
+
   test("model errors end the run with finishReason error (AC9)", async () => {
     const { agent, dir, cleanup } = agentFor(new FakeModel([
-      { error: new ModelError("rate_limited", "rate_limited: slow down") },
+      { error: new ModelError("invalid_response", "invalid_response: malformed payload") },
     ]))
     const session = agent.createSession(dir)
 
     const result = await agent.run(session, "will fail")
 
     expect(result.finishReason).toBe("error")
-    expect(result.error).toContain("rate_limited")
+    expect(result.error).toContain("invalid_response")
     expect(session.status).toBe("idle")
     cleanup()
   })

@@ -1,4 +1,11 @@
-import type { Model, ModelAssistantPart, ModelResponse } from "@minicode/model"
+import type {
+  Model,
+  ModelAssistantPart,
+  ModelFinishReason,
+  ModelResponse,
+  ModelToolCall,
+  ModelUsage,
+} from "@minicode/model"
 import { ModelError } from "@minicode/model"
 import { contextBudget } from "../context-budget"
 import type { Session } from "../session/session"
@@ -12,6 +19,8 @@ import { buildSystemPrompt } from "./system-prompt"
 export interface LoopOptions {
   signal?: AbortSignal
   maxIterations?: number
+  /** Base delay for auto-retry backoff (2s, 4s, …). Test seam. */
+  autoRetryDelayMs?: number
   onEvent?: (event: RunEvent) => void
 }
 
@@ -20,6 +29,29 @@ const DEFAULT_MAX_ITERATIONS = 100
 const DOOM_LOOP_THRESHOLD = 3
 /** Compaction retries per run on provider-reported context overflow. */
 const MAX_COMPACTION_RETRIES = 5
+/** Delayed retries of a rate-limited model call (auto-retry). */
+const MAX_AUTO_RETRIES = 3
+const AUTO_RETRY_DELAY_MS = 2000
+
+/** Resolves after `ms`, or early with `true` when the signal aborts. */
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<boolean> {
+  return new Promise(resolve => {
+    if (signal?.aborted) {
+      resolve(true)
+      return
+    }
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      resolve(true)
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve(false)
+    }, ms)
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
 
 /**
  * The Coding Agent engine:
@@ -48,6 +80,7 @@ export class AgentLoop {
     const signal = opts.signal
     const emit = opts.onEvent ?? (() => {})
     const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS
+    const autoRetryDelayMs = opts.autoRetryDelayMs ?? AUTO_RETRY_DELAY_MS
 
     if (signal?.aborted) return { aborted: true, finishReason: "aborted", iterations: 0 }
 
@@ -77,6 +110,7 @@ export class AgentLoop {
     let inputTokens = 0
     let outputTokens = 0
     let compactionRetries = 0
+    let retryAttempt = 0
     const recentCalls: string[] = []
 
     while (true) {
@@ -88,18 +122,44 @@ export class AgentLoop {
 
       emit({ type: "iteration_start", iteration: iterations })
 
-      let response: ModelResponse
+      // Stream the model response: text deltas reach the UI as they arrive
+      // (assistant_delta), tool calls and usage accumulate into the same
+      // normalized shapes the generate() path produced.
+      let content = ""
+      const toolCalls: ModelToolCall[] = []
+      let usage: ModelUsage | undefined
+      let finishReason: ModelFinishReason = "unknown"
       try {
-        response = await this.model.generate({
+        const stream = this.model.stream({
           messages: this.session.toRequestMessages(),
           tools: toModelTools(this.tools),
           // Per-request output ceiling from the locked 75/25 budget.
           maxOutputTokens: budget.outputBudget,
           signal,
         })
+        for await (const event of stream) {
+          // Cancellation mid-stream is surfaced by the model layer as a
+          // `cancelled` ModelError through the signal it was given.
+          switch (event.type) {
+            case "text_delta":
+              content += event.text
+              emit({ type: "assistant_delta", iteration: iterations, text: event.text })
+              break
+            case "tool_call":
+              toolCalls.push(event.toolCall)
+              break
+            case "usage":
+              usage = event.usage
+              break
+            case "finish":
+              finishReason = event.reason
+              break
+          }
+        }
       } catch (err) {
-        if (signal?.aborted) return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
-
+        if (signal?.aborted || (err instanceof ModelError && err.code === "cancelled")) {
+          return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
+        }
         // Provider-reported overflow: compact and retry the iteration —
         // bounded, so a pathological model cannot loop forever.
         if (err instanceof ModelError && err.code === "context_exceeded") {
@@ -115,6 +175,25 @@ export class AgentLoop {
           }
           return { aborted: false, finishReason: "error", iterations, inputTokens, outputTokens, error: err.message }
         }
+        // Auto-retry: transient provider throttling gets a bounded
+        // sequence of delayed retries (with an event so the UI can show it).
+        if (err instanceof ModelError && err.code === "rate_limited" && retryAttempt < MAX_AUTO_RETRIES) {
+          retryAttempt += 1
+          const delayMs = autoRetryDelayMs * 2 ** (retryAttempt - 1)
+          emit({
+            type: "auto_retry",
+            attempt: retryAttempt,
+            maxAttempts: MAX_AUTO_RETRIES,
+            delayMs,
+            errorMessage: err.message,
+          })
+          const abortedDuringWait = await abortableDelay(delayMs, signal)
+          if (abortedDuringWait) {
+            return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
+          }
+          iterations -= 1 // the retried attempt replaces this one
+          continue
+        }
         return {
           aborted: false,
           finishReason: "error",
@@ -125,13 +204,21 @@ export class AgentLoop {
         }
       }
 
-      if (response.usage?.inputTokens !== undefined) inputTokens += response.usage.inputTokens
-      if (response.usage?.outputTokens !== undefined) outputTokens += response.usage.outputTokens
+      if (usage?.inputTokens !== undefined) inputTokens += usage.inputTokens
+      if (usage?.outputTokens !== undefined) outputTokens += usage.outputTokens
+
+      const response: ModelResponse = {
+        content,
+        toolCalls,
+        usage,
+        finishReason,
+      }
 
       const assistantMsg = this.session.appendAssistant(
         assistantContentFrom(response) as ModelAssistantPart[],
         { usage: response.usage, finishReason: response.finishReason },
       )
+      retryAttempt = 0 // a successful call resets the retry streak
       emit({
         type: "model_response",
         iteration: iterations,
@@ -142,10 +229,10 @@ export class AgentLoop {
 
       if (response.toolCalls.length === 0) {
         // Final answer (or a truncated one): the turn is over.
-        const finishReason = response.finishReason === "stop"
+        const runFinishReason = response.finishReason === "stop"
           ? "stop"
           : response.finishReason === "length" ? "length" : "unknown"
-        return { aborted: false, finishReason, iterations, inputTokens, outputTokens }
+        return { aborted: false, finishReason: runFinishReason, iterations, inputTokens, outputTokens }
       }
 
       // Execute the requested calls sequentially, in provider order.

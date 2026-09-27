@@ -18,7 +18,7 @@ describe("TUI component mapping (V2)", () => {
 		const done = render(component)
 		expect(done).toContain("✓")
 		expect(done).toContain("3 pass")
-		expect(done).toContain("(1 more lines)")
+		expect(done).toContain("(1 more lines, ctrl+o to expand)")
 		expect(done).not.toContain("done in 12ms")
 	})
 

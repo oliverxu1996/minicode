@@ -1,22 +1,36 @@
-import { Container, Markdown, Text, type Component } from "@minicode/tui"
+import { Box, Container, Markdown, Spacer, Text, type Component } from "@minicode/tui"
 import type { SessionMessage } from "../session/types"
 import { ansi, markdownTheme } from "./theme"
 
 /**
- * MiniCode chat components, adapted from Pi's interactive-mode components
- * (assistant-message.ts, tool-execution.ts) down to what the v0.1 runtime
- * exposes: complete assistant texts and tool calls with string results.
+ * MiniCode chat components for the runtime's message model.
  */
 
-/** A submitted user task. */
+/** Maximum result lines kept per tool component (expanded rendering caps
+ *  here too, so pathological outputs cannot exhaust memory). */
+const MAX_RESULT_LINES = 500
+
+/** A submitted user task: markdown in a background-filled box. */
 export function userMessage(text: string): Component {
-	return new Text(`${ansi.green("❯")} ${text}`, 1, 0)
+	const box = new Box(1, 0, (line) => `\x1b[48;5;236m${line}\x1b[49m`)
+	box.addChild(
+		new Markdown(text.trim(), 0, 0, markdownTheme(), {
+			color: (content) => `\x1b[97m${content}\x1b[39m`,
+		}),
+	)
+	const wrapper = new Container()
+	wrapper.addChild(new Text("", 0, 0))
+	wrapper.addChild(box)
+	return wrapper
 }
 
-/** A completed assistant response, rendered as Markdown. */
+/** A completed assistant response, rendered as Markdown with a leading spacer. */
 export function assistantMessage(text: string): Component {
-	if (text.trim().length === 0) return new Text("", 0, 0)
-	return new Markdown(text, 1, 0, markdownTheme())
+	const container = new Container()
+	if (text.trim().length === 0) return container
+	container.addChild(new Spacer(1))
+	container.addChild(new Markdown(text.trim(), 1, 0, markdownTheme()))
+	return container
 }
 
 /** A dim notice line (compaction, recovery, abort notices). */
@@ -55,14 +69,15 @@ export function toolArgumentSummary(name: string, input: Record<string, unknown>
 
 /**
  * One tool call line with its result: running → success/failure, with the result
- * preview collapsed to a few lines so large outputs never flood the
- * terminal.
+ * collapsed to a preview plus a "more lines" hint; Ctrl-O toggles the
+ * full output for every tool at once.
  */
 export class ToolExecutionComponent implements Component {
 	private readonly container = new Container()
 	private state: "running" | "success" | "error" = "running"
 	private input: Record<string, unknown>
-	private preview: string[] = []
+	private fullLines: string[] = []
+	private expanded = false
 
 	constructor(
 		readonly toolCallId: string,
@@ -87,15 +102,17 @@ export class ToolExecutionComponent implements Component {
 		this.state = ok ? "success" : "error"
 
 		const plain = result.replace(/\x1b\[[0-9;]*m/g, "")
-		const lines = plain.split("\n").filter(line => line.trim().length > 0)
-		const preview: string[] = []
-		for (const line of lines.slice(0, 3)) {
-			preview.push(`      ${ansi.gray(line.length > 120 ? `${line.slice(0, 120)}…` : line)}`)
-		}
-		if (lines.length > 3) {
-			preview.push(`      ${ansi.gray(`… (${lines.length - 3} more lines)`)}`)
-		}
-		this.preview = preview
+		this.fullLines = plain
+			.split("\n")
+			.filter(line => line.trim().length > 0)
+			.slice(0, MAX_RESULT_LINES)
+			.map(line => (line.length > 200 ? `${line.slice(0, 200)}…` : line))
+		this.rebuild()
+	}
+
+	/** Ctrl-O toggles full output for every tool component. */
+	setExpanded(expanded: boolean): void {
+		this.expanded = expanded
 		this.rebuild()
 	}
 
@@ -115,8 +132,15 @@ export class ToolExecutionComponent implements Component {
 	private rebuild(): void {
 		this.container.clear()
 		this.container.addChild(new Text(this.headerLine(), 0, 0))
-		for (const line of this.preview) {
-			this.container.addChild(new Text(line, 0, 0))
+		const shown = this.expanded ? this.fullLines : this.fullLines.slice(0, 3)
+		for (const line of shown) {
+			this.container.addChild(new Text(`      ${ansi.gray(line)}`, 0, 0))
+		}
+		const remaining = this.fullLines.length - shown.length
+		if (remaining > 0) {
+			this.container.addChild(
+				new Text(`      ${ansi.gray(`… (${remaining} more lines, ctrl+o to expand)`)}`, 0, 0),
+			)
 		}
 	}
 

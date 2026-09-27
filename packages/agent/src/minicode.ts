@@ -61,7 +61,12 @@ export class MiniCode {
   async run(
     session: Session,
     task: string,
-    opts: { signal?: AbortSignal; maxIterations?: number; onEvent?: (event: RunEvent) => void } = {},
+    opts: {
+      signal?: AbortSignal
+      maxIterations?: number
+      autoRetryDelayMs?: number
+      onEvent?: (event: RunEvent) => void
+    } = {},
   ): Promise<RunResult> {
     const model = this.modelOverride ?? await this.resolveModel()
     return runTask({
@@ -70,26 +75,35 @@ export class MiniCode {
       task,
       signal: opts.signal,
       maxIterations: opts.maxIterations,
+      autoRetryDelayMs: opts.autoRetryDelayMs,
       onEvent: opts.onEvent,
     })
   }
 
   private async resolveModel(): Promise<Model> {
-    const manager = await ModelManager.load()
-    const model = manager.active()
+    const model = await this.currentModel()
     if (model === undefined) {
       throw new Error(
-        "No active model configured. Add one via @minicode/model ModelManager (add + activate).",
+        "No active model configured. Create " +
+          `${process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config")}/minicode/models.json ` +
+          'with {"version":1,"models":[{"id":"…","name":"…","protocol":"openai"|"anthropic","endpoint":"…","model":"…","apiKey":"…","contextWindow":128000,"maxOutputTokens":8192}],"activeModelId":"…"} ' +
+          "and restart, or pass a Model to new MiniCode({ model }).",
       )
     }
     return model
   }
 
+  /** The model a run would use right now (override, else the configured
+   *  active model), or undefined when nothing is configured. */
+  async currentModel(): Promise<Model | undefined> {
+    if (this.modelOverride !== undefined) return this.modelOverride
+    const manager = await ModelManager.load()
+    return manager.active()
+  }
+
   /** Display label of the model a run would use right now. */
   async currentModelLabel(): Promise<string> {
-    if (this.modelOverride !== undefined) return this.modelOverride.id
-    const manager = await ModelManager.load()
-    return manager.active()?.id ?? "no model"
+    return (await this.currentModel())?.id ?? "no model"
   }
 
   private track(session: Session): void {

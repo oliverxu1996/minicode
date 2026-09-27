@@ -70,9 +70,17 @@ export type RunFinishReason =
 export type RunEvent =
   | { type: "run_start"; sessionId: string; task: string }
   | { type: "iteration_start"; iteration: number }
+  | { type: "assistant_delta"; iteration: number; text: string }
   | { type: "model_response"; iteration: number; finishReason: string; usage?: ModelUsage }
   | { type: "tool_call"; iteration: number; toolCallId: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; iteration: number; toolCallId: string; name: string; ok: boolean; result: string }
   | { type: "compaction"; summarizedMessages: number }
+  | {
+      type: "auto_retry"
+      attempt: number
+      maxAttempts: number
+      delayMs: number
+      errorMessage: string
+    }
   | { type: "recovery"; note: string }
   | { type: "run_end"; finishReason: RunFinishReason; iterations: number; usage?: ModelUsage; error?: string }

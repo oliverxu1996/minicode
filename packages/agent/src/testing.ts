@@ -1,5 +1,6 @@
 import type {
   Model,
+  ModelEvent,
   ModelRequest,
   ModelResponse,
   ModelToolCall,
@@ -12,7 +13,8 @@ export type ScriptedResponse =
 /**
  * Deterministic fake `Model` for runtime tests: replays a script of
  * responses (or thrown errors) in order and records every request, so
- * control-flow assertions need no external model.
+ * control-flow assertions need no external model. The loop consumes the
+ * scripted response through `stream()` as normalized events.
  */
 export class FakeModel implements Model {
   readonly id: string
@@ -32,16 +34,31 @@ export class FakeModel implements Model {
   }
 
   async generate(request: ModelRequest): Promise<ModelResponse> {
-    const step = this.script[this.index]
-    this.index += 1
-    this.requests.push(request)
-    if (step === undefined) throw new Error(`FakeModel: no scripted response for call ${this.index - 1}`)
-    if ("error" in step) throw step.error
+    const step = this.next(request)
     return step
   }
 
-  stream(): AsyncIterable<never> {
-    throw new Error("FakeModel.stream is not used by the v0.1 loop")
+  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+    const response = await this.generate(request)
+    if (response.content.length > 0) {
+      yield { type: "text_delta", text: response.content }
+    }
+    for (const call of response.toolCalls) {
+      yield { type: "tool_call", toolCall: call }
+    }
+    if (response.usage) {
+      yield { type: "usage", usage: response.usage }
+    }
+    yield { type: "finish", reason: response.finishReason }
+  }
+
+  private next(request: ModelRequest): ModelResponse {
+    this.requests.push(request)
+    const step = this.script[this.index]
+    this.index += 1
+    if (step === undefined) throw new Error(`FakeModel: no scripted response for call ${this.index - 1}`)
+    if ("error" in step) throw step.error
+    return step
   }
 }
 

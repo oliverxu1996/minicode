@@ -16,6 +16,8 @@ export interface RunDeps {
   signal?: AbortSignal
   /** Maximum model iterations before the run is force-terminated. */
   maxIterations?: number
+  /** Base delay for rate-limit auto-retry backoff. Test seam. */
+  autoRetryDelayMs?: number
   /** Toolset override; defaults to the fixed coding toolset. */
   tools?: ReadonlyMap<string, Tool>
   onEvent?: (event: RunEvent) => void

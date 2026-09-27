@@ -240,6 +240,12 @@ function classify(error: unknown): Failure {
     if (status === 401 || status === 403) {
       return { code: "authentication_failed", retryable: false }
     }
+    // Providers report transient overload/limit conditions with assorted
+    // status codes and body codes (e.g. BigModel 1302/1305 with HTTP 400);
+    // they are retryable regardless of the HTTP status.
+    if (isProviderOverload(error)) {
+      return { code: "rate_limited", retryable: true, retryAfterMs }
+    }
     if (status === 429) {
       return { code: "rate_limited", retryable: true, retryAfterMs }
     }
@@ -321,6 +327,16 @@ function isContextExceeded(error: APICallError): boolean {
   if (error.statusCode !== 400 && error.statusCode !== 413) return false
   const text = `${error.message} ${error.responseBody ?? ""}`
   return CONTEXT_EXCEEDED_PATTERN.test(text)
+}
+
+/** Provider body/message markers for transient overload or throttling. */
+const PROVIDER_OVERLOAD_PATTERN =
+  /访问量过大|稍后再试|rate limit|too many requests|overloaded|please try again later|\bcode["']?\s*[:=]\s*["']?130[25]/i
+
+function isProviderOverload(error: APICallError): boolean {
+  if (error.statusCode === 429) return true
+  const text = `${error.message} ${error.responseBody ?? ""} ${JSON.stringify(error.data ?? "")}`
+  return PROVIDER_OVERLOAD_PATTERN.test(text)
 }
 
 /** Detects cancellation raised as an AbortError anywhere in the cause chain. */
