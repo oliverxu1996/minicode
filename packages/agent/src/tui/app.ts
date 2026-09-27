@@ -21,6 +21,7 @@ import { isProjectTrusted } from "../config/trust"
 import { ansi, markdownTheme } from "./theme"
 import { Selector, type SelectorItem } from "./selector"
 import { MiniCodeAutocomplete } from "./autocomplete"
+import { expandFileReferences } from "./expand"
 import { COMMANDS, findCommand, type CommandContext } from "./commands"
 import {
 	ToolExecutionComponent,
@@ -396,7 +397,7 @@ export class MiniCodeTui {
 		}
 
 		this.chat.addChild(userMessage(text))
-		await this.startRun(text)
+		await this.startRun(expandFileReferences(text, this.session.cwd))
 	}
 
 	private readTemplate(name: string): string | null {
