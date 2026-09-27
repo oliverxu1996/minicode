@@ -1,4 +1,5 @@
 import { MiniCode } from "../minicode"
+import { MINICODE_VERSION } from "../version"
 import { MiniCodeTui } from "./app"
 
 /**
@@ -8,17 +9,25 @@ import { MiniCodeTui } from "./app"
  * bun packages/agent/src/tui/main.ts [options] [workspace-directory]
  * ```
  *
+ * The same entry point backs every distribution: running from a checkout, the
+ * npm package's bundled `minicode` binary, and the standalone release build.
+ * Nothing about the CLI differs between them.
+ *
  * Options:
  *   --print, -p <task>   Non-interactive: run the task and print the final
  *                        response (add --mode json to stream events as JSONL)
  *   --mode json          With -p: emit every RunEvent as a JSON line
  *   --continue, -c       Continue the most recent session in the workspace
  *   --resume <id>        Resume a specific session
- *   --new                Force a new session (default without --continue/--resume)
+ *   --version, -v        Print the version
+ *   --help, -h           Print usage
  *
  * The workspace directory defaults to the current directory. Model
  * configuration comes from `@minicode/model` ModelManager (the configured
  * active model) — or use /login inside the TUI on first run.
+ *
+ * Interactive mode needs a terminal, so it is refused when stdin is not a TTY
+ * (see `runCli`); use -p for scripts, pipes, and CI.
  */
 
 interface CliArgs {
@@ -80,8 +89,47 @@ async function resolveSession(agent: MiniCode, args: CliArgs): Promise<{ session
   return { session: null, label: args.cwd }
 }
 
-async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2))
+/** Where runCli writes, so the CLI can be driven from tests. */
+export interface CliIO {
+  readonly stdout: (text: string) => void
+  readonly stderr: (text: string) => void
+  /** False in scripts, pipes, and CI, where the interactive TUI cannot run. */
+  readonly stdinIsTTY: boolean
+}
+
+export function helpText(): string {
+  return `MiniCode — standalone coding agent
+
+usage: minicode [options] [workspace]
+
+  -p, --print <task>   run one task and print the final response
+      --mode json      with -p: emit RunEvents as JSON lines
+  -c, --continue       continue the most recent session in the workspace
+      --resume <id>    resume a specific session
+      --cwd <dir>      workspace directory (default: current directory)
+  -v, --version        print the MiniCode version
+  -h, --help           show this help
+
+first run: use /login inside the TUI to configure a model
+(protocol, endpoint, model name, API key), or write
+$XDG_CONFIG_HOME/minicode/models.json directly.`
+}
+
+/**
+ * Run the CLI. Returns the process exit code, or `null` when the interactive
+ * TUI has taken over the process — it owns its own shutdown.
+ */
+export async function runCli(argv: string[], io: CliIO): Promise<number | null> {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    io.stdout(helpText() + "\n")
+    return 0
+  }
+  if (argv.includes("--version") || argv.includes("-v")) {
+    io.stdout(MINICODE_VERSION + "\n")
+    return 0
+  }
+
+  const args = parseArgs(argv)
 
   // ── non-interactive modes ────────────────────────────────────────
   if (args.print !== null) {
@@ -92,52 +140,56 @@ async function main(): Promise<void> {
     const result = await agent.run(active, args.print, {
       onEvent: event => {
         if (args.jsonMode) {
-          process.stdout.write(JSON.stringify(event) + "\n")
+          io.stdout(JSON.stringify(event) + "\n")
         }
       },
     })
 
     if (args.jsonMode) {
-      process.stdout.write(JSON.stringify({ type: "result", finishReason: result.finishReason, iterations: result.iterations, error: result.error ?? null }) + "\n")
+      io.stdout(JSON.stringify({ type: "result", finishReason: result.finishReason, iterations: result.iterations, error: result.error ?? null }) + "\n")
     } else {
       const last = active.lastAssistant()
       const text = last !== undefined
         ? last.content.filter(part => part.type === "text").map(part => part.text).join("")
         : ""
-      process.stdout.write(text + "\n")
-      if (result.error !== undefined) process.stderr.write(`minicode: ${result.error}\n`)
+      io.stdout(text + "\n")
+      if (result.error !== undefined) io.stderr(`minicode: ${result.error}\n`)
     }
-    process.exit(result.finishReason === "stop" ? 0 : 1)
+    return result.finishReason === "stop" ? 0 : 1
   }
 
   // ── interactive TUI ──────────────────────────────────────────────
+  // The TUI reads keystrokes from stdin. Without a terminal it would sit
+  // waiting on input that never arrives, painting escape sequences into a
+  // pipe, so refuse before starting it rather than hang.
+  if (!io.stdinIsTTY) {
+    io.stderr(
+      `minicode: stdin is not a terminal, so the interactive UI cannot start.\n` +
+      `Run a single task instead:  minicode -p "<task>"\n`,
+    )
+    return 1
+  }
+
   const agent = new MiniCode()
   const { session: resumed, label } = await resolveSession(agent, args)
   const session = resumed ?? agent.createSession(args.cwd)
   const app = new MiniCodeTui({ agent, session, label })
   app.start()
+  return null
 }
 
-const argv = process.argv.slice(2)
-if (argv.includes("--help") || argv.includes("-h")) {
-  console.log(`MiniCode — standalone coding agent
-
-usage: bun packages/agent/src/tui/main.ts [options] [workspace]
-
-  -p, --print <task>   run one task and print the final response
-      --mode json      with -p: emit RunEvents as JSON lines
-  -c, --continue       continue the most recent session in the workspace
-      --resume <id>    resume a specific session
-      --cwd <dir>      workspace directory (default: current directory)
-  -h, --help           show this help
-
-first run: use /login inside the TUI to configure a model
-(protocol, endpoint, model name, API key), or write
-$XDG_CONFIG_HOME/minicode/models.json directly.`)
-  process.exit(0)
+if (import.meta.main) {
+  runCli(process.argv.slice(2), {
+    stdout: text => process.stdout.write(text),
+    stderr: text => process.stderr.write(text),
+    stdinIsTTY: Boolean(process.stdin.isTTY),
+  }).then(
+    code => {
+      if (code !== null) process.exit(code)
+    },
+    err => {
+      process.stderr.write((err instanceof Error ? err.message : String(err)) + "\n")
+      process.exit(1)
+    },
+  )
 }
-
-main().catch(err => {
-  console.error(err instanceof Error ? err.message : err)
-  process.exit(1)
-})
