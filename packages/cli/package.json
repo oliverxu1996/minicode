@@ -1,0 +1,28 @@
+{
+  "name": "minicode",
+  "version": "0.1.0",
+  "description": "MiniCode — a terminal coding agent that works directly in your repository",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "minicode": "dist/minicode.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "prepack": "cd ../.. && bun run build:cli && cp CHANGELOG.md packages/cli/CHANGELOG.md && cp LICENSE packages/cli/LICENSE"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.58",
+    "@ai-sdk/openai": "4.0.71",
+    "ai": "7.0.107",
+    "diff": "9.0.0",
+    "get-east-asian-width": "1.6.0",
+    "marked": "18.0.11",
+    "zod": "4.6.5"
+  }
+}

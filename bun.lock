@@ -18,6 +18,22 @@
         "diff": "9.0.0",
       },
     },
+    "packages/cli": {
+      "name": "minicode",
+      "version": "0.1.0",
+      "bin": {
+        "minicode": "dist/minicode.js",
+      },
+      "dependencies": {
+        "@ai-sdk/anthropic": "4.0.58",
+        "@ai-sdk/openai": "4.0.71",
+        "ai": "7.0.107",
+        "diff": "9.0.0",
+        "get-east-asian-width": "1.6.0",
+        "marked": "18.0.11",
+        "zod": "4.6.5",
+      },
+    },
     "packages/model": {
       "name": "@minicode/model",
       "version": "0.1.0",
@@ -77,6 +93,8 @@
     "json-schema": ["json-schema@0.4.0", "", {}, "sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA=="],
 
     "marked": ["marked@18.0.11", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-HnslJfsZkRPBDJRHvVtAaWlZHEpSu7u8LgQuJCELjRKuWR+hpq4A7sLq3p8HaI9ypVoXDXxV34CsQJEe1+J5Aw=="],
+
+    "minicode": ["minicode@workspace:packages/cli"],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

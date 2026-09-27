@@ -50,7 +50,21 @@ MiniCode 刻意专注于软件开发，它并不打算成为一个通用的 AI �
 
 ## 快速开始
 
-MiniCode 运行在 [Bun](https://bun.sh) 之上：
+**前提条件：** [Bun](https://bun.sh) 必须已安装并在 PATH 中可用。
+
+全局安装 MiniCode，然后在你的项目中启动：
+
+```sh
+npm install -g minicode
+cd ~/my-project
+minicode
+```
+
+首次启动时没有配置模型，使用 `/login` 完成配置，然后输入任务。
+
+### 从源码运行
+
+要开发 MiniCode 本身，可以从检出运行：
 
 ```sh
 git clone https://github.com/oliverxu1996/minicode.git

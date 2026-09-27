@@ -50,7 +50,21 @@ MiniCode はソフトウェア開発に集中的に取り組むためのツー�
 
 ## クイックスタート
 
-MiniCode は [Bun](https://bun.sh) 上で動作します。
+**前提条件:** [Bun](https://bun.sh) がインストール済みで PATH から利用できること。
+
+MiniCode をグローバルインストールし、プロジェクト内で起動します:
+
+```sh
+npm install -g minicode
+cd ~/my-project
+minicode
+```
+
+初回起動時はモデルが未設定です。`/login` で設定を行い、タスクを入力します。
+
+### ソースから実行
+
+MiniCode 自体を開発する場合はチェックアウトから実行します:
 
 ```sh
 git clone https://github.com/oliverxu1996/minicode.git

@@ -50,7 +50,21 @@ MiniCode is intentionally focused on software development. It is not trying to b
 
 ## Quick start
 
-MiniCode runs on [Bun](https://bun.sh):
+**Prerequisite:** [Bun](https://bun.sh) must be installed and available on PATH.
+
+Install MiniCode globally and start it in your project:
+
+```sh
+npm install -g minicode
+cd ~/my-project
+minicode
+```
+
+On first launch, use `/login` to configure a model, then type a task.
+
+### Running from source
+
+To develop MiniCode itself, run it from a checkout:
 
 ```sh
 git clone https://github.com/oliverxu1996/minicode.git

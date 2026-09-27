@@ -6,7 +6,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "build:cli": "bun build --target=bun --minify --banner '#!/usr/bin/env bun' --outfile packages/cli/dist/minicode.js packages/agent/src/tui/main.ts && chmod +x packages/cli/dist/minicode.js"
   },
   "devDependencies": {
     "@types/bun": "1.3.13",

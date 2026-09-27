@@ -50,7 +50,21 @@ MiniCode는 소프트웨어 개발에 집중합니다. 범용 AI 어시스턴트
 
 ## 빠른 시작
 
-MiniCode는 [Bun](https://bun.sh) 위에서 실행됩니다.
+**전제 조건:** [Bun](https://bun.sh)이 설치되어 PATH에서 사용 가능해야 합니다.
+
+MiniCode를 전역 설치하고 프로젝트에서 시작합니다:
+
+```sh
+npm install -g minicode
+cd ~/my-project
+minicode
+```
+
+첫 실행 시 모델이 설정되어 있지 않으면 `/login`으로 설정한 후 작업을 입력합니다.
+
+### 소스에서 실행
+
+MiniCode 자체를 개발하려면 체크아웃에서 실행합니다:
 
 ```sh
 git clone https://github.com/oliverxu1996/minicode.git
