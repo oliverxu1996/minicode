@@ -13,6 +13,9 @@ agent spends less effort on work that never needed to happen.
 
 The project is early-stage and experimental. Expect the design to keep moving.
 
+Current baseline: **v0.1.0** — see [CHANGELOG.md](CHANGELOG.md) for what is
+included and [docs/usage.md](docs/usage.md) for running the agent.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
