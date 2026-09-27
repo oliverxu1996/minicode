@@ -71,6 +71,8 @@ export type RunEvent =
   | { type: "run_start"; sessionId: string; task: string }
   | { type: "iteration_start"; iteration: number }
   | { type: "assistant_delta"; iteration: number; text: string }
+  | { type: "reasoning_delta"; iteration: number; text: string }
+  | { type: "steered"; iteration: number }
   | { type: "model_response"; iteration: number; finishReason: string; usage?: ModelUsage }
   | { type: "tool_call"; iteration: number; toolCallId: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; iteration: number; toolCallId: string; name: string; ok: boolean; result: string }

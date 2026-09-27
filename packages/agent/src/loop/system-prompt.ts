@@ -1,3 +1,5 @@
+import type { Skill } from "../config/resources"
+import { formatSkillPrompt } from "../config/resources"
 import type { Session } from "../session/session"
 
 /**
@@ -21,9 +23,16 @@ How you work:
 
 When the task is complete, reply with a concise final summary: what you changed, which commands you ran to verify, and the results. If you cannot complete the task, say so plainly and explain exactly what blocked you.`
 
-/** Builds the per-run system prompt: instructions + environment + recovery note. */
-export function buildSystemPrompt(session: Session): string {
+/** Builds the per-run system prompt: instructions + env + project
+ *  instructions (AGENTS.md) + skills + recovery note. */
+export function buildSystemPrompt(
+  session: Session,
+  opts: { projectInstructions?: string | null; skills?: Skill[] } = {},
+): string {
   const env = `<env>\nWorking directory: ${session.cwd}\nPlatform: ${process.platform}\nToday's date: ${new Date().toDateString()}\n</env>`
+  const skills = formatSkillPrompt(opts.skills ?? [])
   const note = session.takeRecoveryNote()
-  return [CODING_AGENT_PROMPT, env, note].filter(Boolean).join("\n\n")
+  return [CODING_AGENT_PROMPT, env, opts.projectInstructions ?? null, skills || null, note]
+    .filter(Boolean)
+    .join("\n\n")
 }

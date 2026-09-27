@@ -123,6 +123,10 @@ export class AISDKRuntime {
                 emitted = true
                 yield { type: "text_delta", text: part.text }
                 break
+              case "reasoning-delta":
+                emitted = true
+                yield { type: "reasoning_delta", text: part.text }
+                break
               case "tool-call":
                 emitted = true
                 yield { type: "tool_call", toolCall: toToolCall(part) }

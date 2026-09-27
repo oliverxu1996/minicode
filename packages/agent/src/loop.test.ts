@@ -52,6 +52,36 @@ describe("AgentLoop control flow (V2)", () => {
     cleanup()
   })
 
+  test("steering interrupts the stream and redirects the agent (AC4)", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      {
+        content: "partial answer",
+        toolCalls: [{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }],
+        finishReason: "tool_call",
+      },
+      textResponse("final after steering"),
+    ]))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    session.steer("actually do something else")
+    const result = await agent.run(session, "original task", { onEvent: e => events.push(e) })
+
+    expect(result.finishReason).toBe("stop")
+    expect(events.some(e => e.type === "steered")).toBe(true)
+    const roles = session.messages.map(m => m.role)
+    expect(roles).toEqual(["user", "assistant", "user", "assistant"])
+    // The partial turn is kept (finishReason aborted)…
+    const partial = session.messages[1]
+    if (partial.role !== "assistant") throw new Error("expected assistant")
+    expect(partial.finishReason).toBe("aborted")
+    // …and the steering instruction is the next user message.
+    const steerMsg = session.messages[2]
+    if (steerMsg.role !== "user") throw new Error("expected user")
+    expect(steerMsg.content).toBe("actually do something else")
+    cleanup()
+  })
+
   test("text deltas stream to the UI as assistant_delta events (G1)", async () => {
     const { agent, dir, cleanup } = agentFor(new FakeModel([
       {

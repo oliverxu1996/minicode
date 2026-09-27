@@ -52,6 +52,10 @@ export class Session {
   status: SessionStatus = "idle"
   updatedAt: number
   readonly messages: SessionMessage[] = []
+  /** User-visible session name (set via /name). */
+  title: string | null = null
+  /** Set when this session was forked/cloned from another session. */
+  parentSessionId: string | null = null
 
   private readonly _ledger = new ToolLedger()
   get ledger(): ToolLedger {
@@ -61,6 +65,7 @@ export class Session {
   private checkpointSink: (() => Promise<void>) | null = null
   private _needsRecovery = false
   private pendingRecoveryNote: string | null = null
+  private pendingSteer: string | null = null
 
   private constructor(config: { id: string; cwd: string; createdAt?: number }) {
     this.id = config.id
@@ -87,6 +92,8 @@ export class Session {
       ? persisted
       : "idle"
     session.updatedAt = typeof json.updatedAt === "number" ? json.updatedAt : 0
+    if (typeof json.title === "string" && json.title.trim().length > 0) session.title = json.title
+    if (typeof json.parentSessionId === "string") session.parentSessionId = json.parentSessionId
     session.messages.push(...parseMessages(json.messages))
     session.ledger.replaceAll(ToolLedger.fromJSON(json.ledger as never))
 
@@ -108,6 +115,8 @@ export class Session {
       status: this.status,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
+      title: this.title,
+      parentSessionId: this.parentSessionId,
       ledger: this.ledger.toJSON(),
       messages: this.messages,
     }
@@ -203,6 +212,25 @@ export class Session {
       if (msg.role === "user") return undefined
     }
     return undefined
+  }
+
+  /** Queues a steering instruction: the active model stream is interrupted
+   *  and the text becomes the next user message. Consumed by the loop. */
+  steer(text: string): void {
+    this.pendingSteer = text
+  }
+
+  /** Returns and clears a pending steering instruction, if any. */
+  consumeSteer(): string | null {
+    const text = this.pendingSteer
+    this.pendingSteer = null
+    return text
+  }
+
+  /** Sets the session title and persists. */
+  async setTitle(title: string): Promise<void> {
+    this.title = title
+    await this.checkpoint()
   }
 
   /** Canonical view for a `ModelRequest`: identities and statuses stripped,

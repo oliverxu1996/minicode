@@ -225,6 +225,11 @@ export type ModelEvent =
       readonly text: string
     }
   | {
+      /** Provider reasoning/thinking output, when the model produces it. */
+      readonly type: "reasoning_delta"
+      readonly text: string
+    }
+  | {
       readonly type: "tool_call"
       readonly toolCall: ModelToolCall
     }

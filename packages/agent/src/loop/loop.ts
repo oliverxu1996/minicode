@@ -7,6 +7,7 @@ import type {
   ModelUsage,
 } from "@minicode/model"
 import { ModelError } from "@minicode/model"
+import type { Skill } from "../config/resources"
 import { contextBudget } from "../context-budget"
 import type { Session } from "../session/session"
 import type { RunEvent } from "../session/types"
@@ -21,6 +22,12 @@ export interface LoopOptions {
   maxIterations?: number
   /** Base delay for auto-retry backoff (2s, 4s, …). Test seam. */
   autoRetryDelayMs?: number
+  /** Project instructions injected into the system prompt (AGENTS.md). */
+  projectInstructions?: string | null
+  /** Skills available to the model via the skill tool. */
+  skills?: Skill[]
+  /** Proactive compaction settings (from runtime settings). */
+  autoCompact?: { enabled: boolean; thresholdPct: number }
   onEvent?: (event: RunEvent) => void
 }
 
@@ -104,13 +111,18 @@ export class AgentLoop {
 
     const budget = contextBudget(this.model.limits)
     const compactor = new Compactor(this.model, this.model.limits.contextWindow)
-    const system = buildSystemPrompt(this.session)
+    const system = buildSystemPrompt(this.session, {
+      projectInstructions: opts.projectInstructions ?? null,
+      skills: opts.skills ?? [],
+    })
 
     let iterations = 0
     let inputTokens = 0
     let outputTokens = 0
+    let lastInputTokens = 0
     let compactionRetries = 0
     let retryAttempt = 0
+    const autoCompact = opts.autoCompact ?? { enabled: true, thresholdPct: 80 }
     const recentCalls: string[] = []
 
     while (true) {
@@ -122,28 +134,48 @@ export class AgentLoop {
 
       emit({ type: "iteration_start", iteration: iterations })
 
+      // Proactive compaction: the last call's input usage crossing the
+      // configured share of the input budget means the next request may
+      // not fit — compact now rather than failing mid-flight.
+      if (autoCompact.enabled) {
+        const threshold = Math.floor(budget.inputBudget * (autoCompact.thresholdPct / 100))
+        if (lastInputTokens >= threshold && lastInputTokens > 0) {
+          const removed = await compactor.compact(this.session)
+          await this.session.checkpoint()
+          emit({ type: "compaction", summarizedMessages: removed })
+        }
+      }
+
       // Stream the model response: text deltas reach the UI as they arrive
       // (assistant_delta), tool calls and usage accumulate into the same
-      // normalized shapes the generate() path produced.
+      // normalized shapes the generate() path produced. The iteration
+      // controller lets steering interrupt the stream without cancelling
+      // the whole run.
+      const iterationAbort = new AbortController()
+      const streamSignal = signal ? AbortSignal.any([signal, iterationAbort.signal]) : iterationAbort.signal
       let content = ""
+      let reasoningText = ""
       const toolCalls: ModelToolCall[] = []
       let usage: ModelUsage | undefined
       let finishReason: ModelFinishReason = "unknown"
+      let steered: string | null = null
       try {
         const stream = this.model.stream({
           messages: this.session.toRequestMessages(),
           tools: toModelTools(this.tools),
           // Per-request output ceiling from the locked 75/25 budget.
           maxOutputTokens: budget.outputBudget,
-          signal,
+          signal: streamSignal,
         })
         for await (const event of stream) {
-          // Cancellation mid-stream is surfaced by the model layer as a
-          // `cancelled` ModelError through the signal it was given.
           switch (event.type) {
             case "text_delta":
               content += event.text
               emit({ type: "assistant_delta", iteration: iterations, text: event.text })
+              break
+            case "reasoning_delta":
+              reasoningText += event.text
+              emit({ type: "reasoning_delta", iteration: iterations, text: event.text })
               break
             case "tool_call":
               toolCalls.push(event.toolCall)
@@ -155,58 +187,88 @@ export class AgentLoop {
               finishReason = event.reason
               break
           }
+          // Steering: a queued instruction interrupts the current stream
+          // and redirects the agent (steering semantics). Checked after
+          // each event so already-arrived output is kept.
+          const steer = this.session.consumeSteer()
+          if (steer !== null) {
+            steered = steer
+            iterationAbort.abort()
+            break
+          }
         }
       } catch (err) {
-        if (signal?.aborted || (err instanceof ModelError && err.code === "cancelled")) {
-          return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
-        }
-        // Provider-reported overflow: compact and retry the iteration —
-        // bounded, so a pathological model cannot loop forever.
-        if (err instanceof ModelError && err.code === "context_exceeded") {
-          if (compactionRetries >= MAX_COMPACTION_RETRIES) {
+        // A steering abort is not a run abort: fall through to the steered
+        // continuation below.
+        if (steered === null) {
+          if (signal?.aborted || (err instanceof ModelError && err.code === "cancelled")) {
+            return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
+          }
+          // Provider-reported overflow: compact and retry the iteration —
+          // bounded, so a pathological model cannot loop forever.
+          if (err instanceof ModelError && err.code === "context_exceeded") {
+            if (compactionRetries >= MAX_COMPACTION_RETRIES) {
+              return { aborted: false, finishReason: "error", iterations, inputTokens, outputTokens, error: err.message }
+            }
+            compactionRetries += 1
+            const removed = await compactor.compact(this.session)
+            await this.session.checkpoint()
+            if (removed > 0) {
+              iterations -= 1 // the retried attempt replaces this one
+              continue
+            }
             return { aborted: false, finishReason: "error", iterations, inputTokens, outputTokens, error: err.message }
           }
-          compactionRetries += 1
-          const removed = await compactor.compact(this.session)
-          await this.session.checkpoint()
-          if (removed > 0) {
+          // Auto-retry: transient provider throttling gets a
+          // bounded sequence of delayed retries (surfaced via auto_retry).
+          if (err instanceof ModelError && err.code === "rate_limited" && retryAttempt < MAX_AUTO_RETRIES) {
+            retryAttempt += 1
+            const delayMs = autoRetryDelayMs * 2 ** (retryAttempt - 1)
+            emit({
+              type: "auto_retry",
+              attempt: retryAttempt,
+              maxAttempts: MAX_AUTO_RETRIES,
+              delayMs,
+              errorMessage: err.message,
+            })
+            const abortedDuringWait = await abortableDelay(delayMs, signal)
+            if (abortedDuringWait) {
+              return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
+            }
             iterations -= 1 // the retried attempt replaces this one
             continue
           }
-          return { aborted: false, finishReason: "error", iterations, inputTokens, outputTokens, error: err.message }
-        }
-        // Auto-retry: transient provider throttling gets a bounded
-        // sequence of delayed retries (with an event so the UI can show it).
-        if (err instanceof ModelError && err.code === "rate_limited" && retryAttempt < MAX_AUTO_RETRIES) {
-          retryAttempt += 1
-          const delayMs = autoRetryDelayMs * 2 ** (retryAttempt - 1)
-          emit({
-            type: "auto_retry",
-            attempt: retryAttempt,
-            maxAttempts: MAX_AUTO_RETRIES,
-            delayMs,
-            errorMessage: err.message,
-          })
-          const abortedDuringWait = await abortableDelay(delayMs, signal)
-          if (abortedDuringWait) {
-            return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
+          return {
+            aborted: false,
+            finishReason: "error",
+            iterations,
+            inputTokens,
+            outputTokens,
+            error: err instanceof Error ? err.message : String(err),
           }
-          iterations -= 1 // the retried attempt replaces this one
-          continue
-        }
-        return {
-          aborted: false,
-          finishReason: "error",
-          iterations,
-          inputTokens,
-          outputTokens,
-          error: err instanceof Error ? err.message : String(err),
         }
       }
 
-      if (usage?.inputTokens !== undefined) inputTokens += usage.inputTokens
-      if (usage?.outputTokens !== undefined) outputTokens += usage.outputTokens
+      if (steered !== null) {
+        // Keep the partial turn visible, then let the steering instruction
+        // redirect the agent from the updated history.
+        if (content.trim().length > 0 || toolCalls.length > 0) {
+          this.session.appendAssistant(assistantContentFrom({ content, toolCalls, finishReason: "unknown" }) as ModelAssistantPart[], {
+            finishReason: "aborted",
+          })
+        }
+        this.session.pushUser(steered)
+        await this.session.checkpoint()
+        emit({ type: "steered", iteration: iterations })
+        iterations -= 1 // steering does not consume an iteration slot
+        continue
+      }
 
+      if (usage?.inputTokens !== undefined) {
+        inputTokens += usage.inputTokens
+        lastInputTokens = usage.inputTokens
+      }
+      if (usage?.outputTokens !== undefined) outputTokens += usage.outputTokens
       const response: ModelResponse = {
         content,
         toolCalls,

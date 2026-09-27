@@ -1,11 +1,15 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { ModelManager, type Model } from "@minicode/model"
+import { ModelManager, type Model, type ModelConfig } from "@minicode/model"
 import { Session } from "./session/session"
 import { SessionStore } from "./session/store"
 import type { RunEvent, SessionStatus } from "./session/types"
 import { CODING_TOOLS } from "./tools"
 import { runTask, type RunResult } from "./loop/run"
+import { loadSettings } from "./config/settings"
+import { isProjectTrusted } from "./config/trust"
+import { formatProjectInstructions, loadProjectContext } from "./config/context"
+import { loadResources } from "./config/resources"
 
 export interface MiniCodeOptions {
   /** Session storage directory. Defaults to
@@ -69,6 +73,14 @@ export class MiniCode {
     } = {},
   ): Promise<RunResult> {
     const model = this.modelOverride ?? await this.resolveModel()
+    // Project context, settings, and resources load per run so edits apply
+    // without restarting.
+    const settings = loadSettings(session.cwd)
+    const trusted = isProjectTrusted(session.cwd)
+    const resources = loadResources(session.cwd, trusted)
+    const contextFile = loadProjectContext(session.cwd)
+    const projectInstructions = formatProjectInstructions(contextFile)
+
     return runTask({
       session,
       model,
@@ -76,6 +88,9 @@ export class MiniCode {
       signal: opts.signal,
       maxIterations: opts.maxIterations,
       autoRetryDelayMs: opts.autoRetryDelayMs,
+      projectInstructions,
+      skills: resources.skills,
+      autoCompact: settings.settings.autoCompact,
       onEvent: opts.onEvent,
     })
   }
@@ -105,6 +120,78 @@ export class MiniCode {
   async currentModelLabel(): Promise<string> {
     return (await this.currentModel())?.id ?? "no model"
   }
+
+  /** The persisted model configuration manager (model lifecycle commands). */
+  async modelManager(): Promise<ModelManager> {
+    return ModelManager.load()
+  }
+
+  /** Activates a configured model by id (persists). */
+  async activateModel(id: string): Promise<void> {
+    const manager = await ModelManager.load()
+    manager.activate(id)
+  }
+
+  /** Removes a configured model (persists). */
+  removeModel(id: string): void {
+    void (async () => {
+      const manager = await ModelManager.load()
+      manager.remove(id)
+    })()
+  }
+
+  /** Adds and activates a model configuration (persists). */
+  async configureModel(config: import("@minicode/model").ModelConfig): Promise<void> {
+    const manager = await ModelManager.load()
+    manager.add(config)
+    manager.activate(config.id)
+  }
+
+  /** Summaries of every persisted session (for resume/tree UIs). */
+  async sessionSummaries(): Promise<Array<{
+    id: string
+    cwd: string
+    title: string | null
+    parentSessionId: string | null
+    updatedAt: number
+    messageCount: number
+    firstUser: string | null
+  }>> {
+    const out: Array<{
+      id: string
+      cwd: string
+      title: string | null
+      parentSessionId: string | null
+      updatedAt: number
+      messageCount: number
+      firstUser: string | null
+    }> = []
+    for (const id of await this.store.list()) {
+      try {
+        const json = await this.store.read(id) as Record<string, unknown>
+        const messages = (json.messages ?? []) as Array<{ role: string; content: unknown; timestamp?: number }>
+        const firstUser = messages.find(m => m.role === "user")
+        out.push({
+          id: typeof json.id === "string" ? json.id : id,
+          cwd: typeof json.cwd === "string" ? json.cwd : "",
+          title: typeof json.title === "string" ? json.title : null,
+          parentSessionId: typeof json.parentSessionId === "string" ? json.parentSessionId : null,
+          updatedAt: typeof json.updatedAt === "number" ? json.updatedAt : 0,
+          messageCount: messages.length,
+          firstUser: firstUser !== undefined && typeof firstUser.content === "string"
+            ? firstUser.content.slice(0, 60)
+            : null,
+        })
+      } catch {
+        // Corrupt file — skip.
+      }
+    }
+    return out.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  /** Reloads per-run caches (settings/context/resources load per run, so
+   *  this is a checkpoint in the flow for the /reload command). */
+  refreshRuntime(): void {}
 
   private track(session: Session): void {
     this.sessions.set(session.id, session)

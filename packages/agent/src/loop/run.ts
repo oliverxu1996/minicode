@@ -2,6 +2,7 @@ import type { Model, ModelResponse } from "@minicode/model"
 import type { Session } from "../session/session"
 import type { RunEvent, RunFinishReason, SessionMessage } from "../session/types"
 import { CODING_TOOLS } from "../tools"
+import { createSkillTool } from "../tools/skill"
 import type { Tool, ToolResult } from "../tools/types"
 import { truncateOutput } from "../tools/truncate"
 import { AgentLoop } from "./loop"
@@ -18,6 +19,12 @@ export interface RunDeps {
   maxIterations?: number
   /** Base delay for rate-limit auto-retry backoff. Test seam. */
   autoRetryDelayMs?: number
+  /** Project instructions (AGENTS.md) injected into the system prompt. */
+  projectInstructions?: string | null
+  /** Skills exposed to the model through the skill tool + system prompt. */
+  skills?: import("../config/resources").Skill[]
+  /** Proactive compaction settings. */
+  autoCompact?: { enabled: boolean; thresholdPct: number }
   /** Toolset override; defaults to the fixed coding toolset. */
   tools?: ReadonlyMap<string, Tool>
   onEvent?: (event: RunEvent) => void
@@ -49,7 +56,12 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
 
   let result: RunResult
   try {
-    const loop = new AgentLoop(session, model, deps.tools ?? CODING_TOOLS)
+    // The skill tool appears only when skills are available.
+    const tools = new Map(deps.tools ?? CODING_TOOLS)
+    if (deps.skills !== undefined && deps.skills.length > 0) {
+      tools.set("skill", createSkillTool(deps.skills))
+    }
+    const loop = new AgentLoop(session, model, tools)
     result = await loop.run(task, deps)
   } catch (err) {
     // The loop is contractually non-throwing; this guards runtime bugs so a
