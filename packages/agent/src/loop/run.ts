@@ -143,7 +143,14 @@ export async function executeTool(
     output = { ok: false, error: `unknown tool ${name}` }
   } else {
     try {
-      output = await tool.execute(input, { toolCallId, cwd: session.cwd, signal: opts.signal })
+      output = await tool.execute(input, {
+        toolCallId,
+        cwd: session.cwd,
+        signal: opts.signal,
+        onOutput: (text: string) => {
+          emit({ type: "tool_progress", iteration: opts.iteration, toolCallId, name, text })
+        },
+      })
     } catch (err) {
       output = { ok: false, error: err instanceof Error ? err.message : String(err) }
     }

@@ -124,6 +124,26 @@ describe("AgentLoop control flow (V2)", () => {
     cleanup()
   })
 
+  test("long-running bash output streams as tool_progress events", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "printf 'a\\n'; sleep 0.3; printf 'b\\n'" } }]),
+      textResponse("saw the output"),
+    ]))
+    const session = agent.createSession(dir)
+    const progress: string[] = []
+
+    await agent.run(session, "stream output", {
+      onEvent: e => {
+        if (e.type === "tool_progress") progress.push(e.text)
+      },
+    })
+
+    expect(progress.length).toBeGreaterThan(0)
+    const combined = progress.join("")
+    expect(combined).toContain("a")
+    cleanup()
+  })
+
   test("non-zero command exit codes are observable data, not failures (AC4)", async () => {
     const { agent, dir, cleanup } = agentFor(new FakeModel([
       toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "exit 3" } }]),

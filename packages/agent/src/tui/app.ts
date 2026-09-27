@@ -515,6 +515,14 @@ export class MiniCodeTui {
 				this.chat.addChild(component)
 				break
 			}
+			case "tool_progress": {
+				const component = this.pendingTools.get(event.toolCallId)
+				if (component !== undefined) {
+					component.setProgress(event.text)
+					this.tui.requestRender()
+				}
+				break
+			}
 			case "tool_result": {
 				const component = this.pendingTools.get(event.toolCallId)
 				if (component !== undefined) {

@@ -97,6 +97,17 @@ export class ToolExecutionComponent implements Component {
 		this.rebuild()
 	}
 
+	/** Live partial output while the tool is still running (bash). */
+	setProgress(text: string): void {
+		if (this.state !== "running") return
+		const plain = text.replace(/\x1b\[[0-9;]*m/g, "")
+		const lines = plain.split("\n").filter(line => line.trim().length > 0)
+		this.progressPreview = lines.slice(-3).map(line => `      ${ansi.gray(line.slice(0, 120))}`)
+		this.rebuild()
+	}
+
+	private progressPreview: string[] = []
+
 	/** Records the outcome; replaces the running line with the final one. */
 	setResult(ok: boolean, result: string): void {
 		this.state = ok ? "success" : "error"
@@ -132,15 +143,21 @@ export class ToolExecutionComponent implements Component {
 	private rebuild(): void {
 		this.container.clear()
 		this.container.addChild(new Text(this.headerLine(), 0, 0))
-		const shown = this.expanded ? this.fullLines : this.fullLines.slice(0, 3)
-		for (const line of shown) {
-			this.container.addChild(new Text(`      ${ansi.gray(line)}`, 0, 0))
-		}
-		const remaining = this.fullLines.length - shown.length
-		if (remaining > 0) {
-			this.container.addChild(
-				new Text(`      ${ansi.gray(`… (${remaining} more lines, ctrl+o to expand)`)}`, 0, 0),
-			)
+		if (this.state === "running") {
+			for (const line of this.progressPreview) {
+				this.container.addChild(new Text(line, 0, 0))
+			}
+		} else {
+			const shown = this.expanded ? this.fullLines : this.fullLines.slice(0, 3)
+			for (const line of shown) {
+				this.container.addChild(new Text(`      ${ansi.gray(line)}`, 0, 0))
+			}
+			const remaining = this.fullLines.length - shown.length
+			if (remaining > 0) {
+				this.container.addChild(
+					new Text(`      ${ansi.gray(`… (${remaining} more lines, ctrl+o to expand)`)}`, 0, 0),
+				)
+			}
 		}
 	}
 

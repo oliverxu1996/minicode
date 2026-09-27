@@ -64,9 +64,22 @@ export const bashTool: Tool = {
         signal,
         env: { ...process.env },
       })
+      const readStreaming = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
+        const reader = stream.getReader()
+        const decoder = new TextDecoder()
+        let text = ""
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk = decoder.decode(value, { stream: true })
+          text += chunk
+          ctx?.onOutput?.(chunk)
+        }
+        return text
+      }
       const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
+        readStreaming(proc.stdout),
+        readStreaming(proc.stderr),
       ])
       const exitCode = await proc.exited
       result = { stdout, stderr, exitCode }

@@ -18,6 +18,9 @@ export interface ToolExecutionContext {
   /** The run's cancellation signal. Long-running tools should honor it so
    *  an aborted run does not wait for a hanging command. */
   readonly signal?: AbortSignal
+  /** Streaming output callback for long-running tools (e.g. bash chunks).
+   *  The runtime forwards it to the UI as tool progress. */
+  readonly onOutput?: (text: string) => void
 }
 
 /**

@@ -75,6 +75,7 @@ export type RunEvent =
   | { type: "steered"; iteration: number }
   | { type: "model_response"; iteration: number; finishReason: string; usage?: ModelUsage }
   | { type: "tool_call"; iteration: number; toolCallId: string; name: string; input: Record<string, unknown> }
+  | { type: "tool_progress"; iteration: number; toolCallId: string; name: string; text: string }
   | { type: "tool_result"; iteration: number; toolCallId: string; name: string; ok: boolean; result: string }
   | { type: "compaction"; summarizedMessages: number }
   | {
