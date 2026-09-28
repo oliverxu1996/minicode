@@ -167,6 +167,11 @@ export async function executeTool(
       ? { type: "text", text: truncated.data }
       : { type: "tool_error", text: truncated.error },
   })
+  // The command *observed* a failure: keep this turn out of request-time
+  // pruning so a repair loop never loses the evidence it needs.
+  if (truncated.ok && truncated.failureEvidence === true) {
+    session.markFailureEvidence(toolMsg)
+  }
   session.ledger.finished(toolCallId, truncated.ok ? "succeeded" : "failed")
   // Result + final ledger state land in ONE checkpoint: no crash window can
   // separate a recorded outcome from its tool-result part.

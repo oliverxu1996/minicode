@@ -2,6 +2,7 @@ import type { ModelAssistantPart, ModelMessage, ModelToolResult, ModelUsage } fr
 import type { SessionMessage, SessionStatus } from "./types"
 import { ToolLedger } from "./ledger"
 import { pruneOldToolOutputs } from "./prune"
+import type { PruneContext, ProjectionMessage } from "./prune"
 
 /** Error text for tool calls whose outcome is unknown after an
  *  interruption — never fabricated success. */
@@ -195,6 +196,16 @@ export class Session {
     ;(toolMsg.content as ModelToolResult[]).push(result)
   }
 
+  /**
+   * Records that this tool turn produced an observation a repair/debugging
+   * loop may depend on (e.g. a command that ran and reported a non-zero exit
+   * code). Durable, and honored by request-time pruning — see
+   * `ToolMessage.failureEvidence`.
+   */
+  markFailureEvidence(toolMsg: SessionMessage & { role: "tool" }): void {
+    ;(toolMsg as { failureEvidence?: boolean }).failureEvidence = true
+  }
+
   /** Finds the tool result recorded for a toolCallId, if any. */
   findToolResult(toolCallId: string): ModelToolResult | undefined {
     for (const msg of this.messages) {
@@ -233,12 +244,25 @@ export class Session {
     await this.checkpoint()
   }
 
-  /** Canonical view for a `ModelRequest`: identities and statuses stripped,
-   *  tool outputs pruned (serialization-time only — durable history is
-   *  untouched). */
-  toRequestMessages(): ModelMessage[] {
+  /**
+   * Canonical view for a `ModelRequest`: identities and statuses stripped, tool
+   * outputs reduced only when the request would exceed its input budget
+   * (serialization-time only — durable history is untouched).
+   *
+   * Callers that know the budget pass `context`; omitting it means no pressure
+   * can be established, so nothing is reduced.
+   */
+  toRequestMessages(context?: PruneContext): ModelMessage[] {
     return pruneOldToolOutputs(
-      this.messages.map(m => ({ role: m.role, content: m.content }) as ModelMessage),
+      this.messages.map(
+        m =>
+          ({
+            role: m.role,
+            content: m.content,
+            ...(m.role === "tool" && m.failureEvidence === true ? { failureEvidence: true } : {}),
+          }) as ProjectionMessage,
+      ),
+      context,
     )
   }
 

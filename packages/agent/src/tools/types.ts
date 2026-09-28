@@ -6,7 +6,18 @@
  * terminate a run by themselves.
  */
 export type ToolResult =
-  | { readonly ok: true; readonly data: string }
+  | {
+      readonly ok: true
+      readonly data: string
+      /**
+       * Set when the command ran and *observed* a failure (e.g. a non-zero
+       * exit code) rather than failing itself. The result stays `ok: true`
+       * with byte-identical `data`: exit codes are data, not tool errors.
+       * Consumed by the runtime to keep the observation out of request-time
+       * pruning.
+       */
+      readonly failureEvidence?: true
+    }
   | { readonly ok: false; readonly error: string }
 
 /** Per-invocation context supplied by the runtime. */

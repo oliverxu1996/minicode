@@ -42,6 +42,16 @@ export interface AssistantMessage extends BaseMessage {
 export interface ToolMessage extends BaseMessage {
   readonly role: "tool"
   readonly content: readonly ModelToolResult[]
+  /**
+   * True when this turn produced an observation a repair/debugging loop may
+   * depend on — e.g. a command that ran and reported a non-zero exit code.
+   *
+   * Agent-local and durable: request-time pruning must never withhold a
+   * result on a message carrying this flag. It is *not* a model-facing field;
+   * it never reaches `ModelToolResult`, so the model still sees `ok`
+   * semantics and the original output text byte-for-byte.
+   */
+  readonly failureEvidence?: boolean
 }
 
 export type SessionMessage = UserMessage | AssistantMessage | ToolMessage

@@ -1,6 +1,16 @@
 import type { Session } from "../session/session"
 import { trustProject } from "../config/trust"
 import type { Skill } from "../config/resources"
+import type { CompactionOutcome } from "../loop/compact"
+
+/**
+ * Outcome of a manual `/compact`, including the case where no model is
+ * configured (which the compaction layer cannot report on its own).
+ *
+ * Deliberately a union rather than a boolean: "nothing to compact" and
+ * "compaction failed" must not render the same message.
+ */
+export type CompactResult = CompactionOutcome | { readonly status: "no-model" }
 
 /** Facade the commands act through — implemented by the TUI app. */
 export interface CommandContext {
@@ -15,7 +25,7 @@ export interface CommandContext {
   /** Prompts for a single line of input (status-prompt style). */
   ask(label: string): Promise<string | null>
   /** Runs the model-based context compaction immediately. */
-  compact(): Promise<boolean>
+  compact(): Promise<CompactResult>
   /** Submits a task through the normal run path (used by templates). */
   submitTask(text: string): Promise<void>
   /** The skills currently available to the model. */
@@ -196,8 +206,21 @@ export const COMMANDS: Command[] = [
     name: "compact",
     description: "Manually compact the session context",
     async execute(ctx) {
-      const done = await ctx.compact()
-      ctx.notify(done ? "context compacted" : "nothing to compact")
+      const result = await ctx.compact()
+      switch (result.status) {
+        case "compacted":
+          ctx.notify(`context compacted — ${result.removed} messages summarized`)
+          break
+        case "no-progress":
+          ctx.notify("nothing to compact")
+          break
+        case "failed":
+          ctx.notify(`compaction failed: ${result.error}`, true)
+          break
+        case "no-model":
+          ctx.notify("no model configured — run /login", true)
+          break
+      }
     },
   },
   {

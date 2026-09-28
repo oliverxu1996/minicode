@@ -22,7 +22,7 @@ import { ansi, markdownTheme } from "./theme"
 import { Selector, type SelectorItem } from "./selector"
 import { MiniCodeAutocomplete } from "./autocomplete"
 import { expandFileReferences } from "./expand"
-import { COMMANDS, findCommand, type CommandContext } from "./commands"
+import { COMMANDS, findCommand, type CommandContext, type CompactResult } from "./commands"
 import {
 	ToolExecutionComponent,
 	assistantMessage,
@@ -168,18 +168,18 @@ export class MiniCodeTui {
 					this.tui.requestRender()
 				})
 			},
-			compact: async () => {
+			compact: async (): Promise<CompactResult> => {
 				const model = await this.options.agent.currentModel()
-				if (model === undefined) return false
+				if (model === undefined) return { status: "no-model" }
 				const { Compactor } = await import("../loop/compact")
 				const compactor = new Compactor(model, model.limits.contextWindow)
-				const removed = await compactor.compact(this.session)
-				if (removed > 0) {
+				const outcome = await compactor.compact(this.session)
+				if (outcome.status === "compacted") {
 					this.chat.clear()
 					this.replaySession()
 					this.tui.requestRender()
 				}
-				return removed > 0
+				return outcome
 			},
 			submitTask: async text => {
 				await this.submit(text)

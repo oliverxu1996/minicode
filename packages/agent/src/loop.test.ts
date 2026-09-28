@@ -258,6 +258,57 @@ describe("AgentLoop control flow (V2)", () => {
     cleanup()
   })
 
+  // I6/D5 — compaction must not build a request that overflows for the same
+  // reason that triggered it. The evidence is the *actual* recorded request
+  // size, not the presence of an error code.
+  test("the compaction request itself is bounded (I6)", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([
+      // [0] succeeds, so the turn has an assistant/tool tail that compaction can
+      // act on. [1] is the provider rejecting the oversized follow-up request.
+      toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }]),
+      { error: new ModelError("context_exceeded", "context_exceeded: request too large") },
+      // [2] is the summarization request, [3] the retried main request.
+      textResponse("summary of prior work"),
+      textResponse("finished after compaction"),
+    ], { contextWindow: 1000, maxOutputTokens: 250 }))
+    const session = agent.createSession(dir)
+    // Enough durable history that compaction has a substantial region to summarize.
+    for (let i = 0; i < 120; i++) session.pushUser(`turn ${i} ${"x".repeat(100)}`)
+
+    const result = await agent.run(session, "final task")
+
+    expect(result.finishReason).toBe("stop")
+    const inputBudget = Math.floor(1000 * 0.75)
+    // [1] is the oversized main request — the reason compaction was needed.
+    expect(model.requestSizes[1]).toBeGreaterThan(inputBudget)
+    // [2] is the summarization request: bounded, despite 120 turns of history.
+    expect(model.requestSizes[2]).toBeLessThanOrEqual(inputBudget)
+    // ...and it carries explicit output headroom rather than the provider default.
+    expect(model.requests[2].maxOutputTokens).toBe(250)
+    cleanup()
+  })
+
+  // I7 — an overflow that cannot be compacted must terminate, not retry forever.
+  test("context overflow that cannot make progress terminates (I7)", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }], {
+        usage: { inputTokens: 900 },
+      }),
+      textResponse(""), // the summarization yields nothing → no progress possible
+    ], { contextWindow: 1000, maxOutputTokens: 250 }))
+    const session = agent.createSession(dir)
+    for (let i = 0; i < 120; i++) session.pushUser(`turn ${i} ${"x".repeat(100)}`)
+
+    const result = await agent.run(session, "final task")
+
+    expect(result.finishReason).toBe("error")
+    expect(result.error).toContain("no progress")
+    // Terminal and finite: the main request plus exactly one summarization
+    // attempt — no unbounded compact/retry loop.
+    expect(model.requests.length).toBe(2)
+    cleanup()
+  })
+
   test("rate-limited calls auto-retry with backoff and then succeed (auto-retry)", async () => {
     const { agent, dir, cleanup } = agentFor(new FakeModel([
       { error: new ModelError("rate_limited", "rate_limited: provider busy (1305)") },

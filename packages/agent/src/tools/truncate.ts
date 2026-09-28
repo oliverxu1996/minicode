@@ -30,6 +30,7 @@ export function truncateOutput(result: ToolResult, cwd: string, toolName?: strin
   } catch {
     // Spilling is best-effort; fall through to hard truncation.
     return {
+      ...result,
       ok: true,
       data: `${result.data.slice(0, THRESHOLD)}\n\n...[${result.data.length - THRESHOLD} bytes truncated]`,
     }
@@ -38,6 +39,7 @@ export function truncateOutput(result: ToolResult, cwd: string, toolName?: strin
   const preview = result.data.slice(0, PREVIEW_LENGTH)
   const truncated = result.data.length - PREVIEW_LENGTH
   return {
+    ...result,
     ok: true,
     data: `${preview}\n\n...${truncated} bytes truncated. Full content saved to: ${join(dir, slug)}\nUse read with offset/limit to view specific sections.`,
   }

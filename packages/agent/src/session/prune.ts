@@ -1,52 +1,225 @@
-import type { ModelMessage, ModelToolResult } from "@minicode/model"
-
-const PRESERVE_TURNS = 2
-const CAP_BYTES = 40 * 1024
-const PLACEHOLDER = "[Old tool result content cleared]"
+import type { ModelMessage, ModelToolOutput, ModelToolResult } from "@minicode/model"
+import { estimateTokens } from "../context-budget"
 
 /**
- * Serialization-time history shrink: tool outputs older than the last two
- * user turns are replaced by a placeholder, and the preserved region's
- * outputs are capped at 40KB cumulative. Tool errors are always preserved
- * (they carry the signal a repair loop needs).
+ * Namespaced discriminator for a pruning marker.
  *
- * Applied to the request copy only — durable history is never rewritten.
+ * Namespacing is what makes collision avoidance independent of which tools
+ * happen to exist today: a future tool that legitimately emits
+ * `{ pruned: true }` as genuine `json` output cannot be misread as a marker.
  */
-export function pruneOldToolOutputs(messages: ModelMessage[]): ModelMessage[] {
-  if (messages.length === 0) return messages
+const PRUNED_KEY = "minicodePruned"
 
-  const userIndices: number[] = []
-  for (let i = 0; i < messages.length; i++) {
-    if (messages[i].role === "user") userIndices.push(i)
+/** The only reason a result is reduced: the request does not fit its budget. */
+export type PruneReason = "request-over-budget"
+
+/** A `ToolMessage` plus Agent-local metadata that never reaches the provider. */
+export type ProjectionMessage = ModelMessage & { readonly failureEvidence?: boolean }
+
+/** Inputs needed to decide whether — and how far — to reduce a request. */
+export interface PruneContext {
+  /**
+   * Provider-reported input tokens for the *previous* request. A trigger
+   * signal only: it measures a request already sent, so it can never be
+   * reduced by changing the current projection.
+   */
+  readonly lastInputTokens?: number
+  /** Tokens available for input, from `contextBudget()`. The hard boundary. */
+  readonly inputBudget: number
+}
+
+/**
+ * The model-facing stand-in for tool output withheld from a request.
+ *
+ * Deliberately a structured object rather than a sentence of text: a `text`
+ * output is wire-indistinguishable from a genuine tool result (see
+ * `toSDKToolOutput`, which maps `text` straight to the SDK's `text` kind), so
+ * no wording could tell the model this is a placeholder rather than content.
+ * `json` is an existing `ModelToolOutput` variant that already has a wire
+ * representation, and the marker carries no recovery *instruction* — it states
+ * facts only.
+ */
+export interface PrunedToolOutput {
+  readonly [PRUNED_KEY]: true
+  readonly reason: PruneReason
+  readonly toolName: string
+  readonly originalBytes: number
+  /**
+   * Recovery affordances carried over verbatim from the output being
+   * replaced, so request-time reduction never destroys a way back to the
+   * content. Populated from the strings mechanism 1 already emits — this is
+   * not a new recovery subsystem.
+   */
+  readonly spillPath?: string
+  readonly resumeOffset?: number
+  /** Present when part of the content was retained rather than withheld. */
+  readonly excerpt?: string
+}
+
+/** True when `output` is a pruning marker rather than real tool content. */
+export function isPrunedToolOutput(
+  output: ModelToolOutput,
+): output is { readonly type: "json"; readonly value: PrunedToolOutput } {
+  if (output.type !== "json") return false
+  const value = output.value
+  return typeof value === "object" && value !== null && (value as Record<string, unknown>)[PRUNED_KEY] === true
+}
+
+// Affordances emitted by mechanism 1 (`tools/truncate.ts`) and by `read`.
+const SPILL_PATTERN = /Full content saved to: ([^\n]+)/
+const OFFSET_PATTERN = /Use offset=(\d+) to continue/
+
+function recoveryHint(text: string): { spillPath?: string; resumeOffset?: number } {
+  const hint: { spillPath?: string; resumeOffset?: number } = {}
+  const spill = SPILL_PATTERN.exec(text)
+  if (spill !== null) hint.spillPath = spill[1].trim()
+  const offset = OFFSET_PATTERN.exec(text)
+  if (offset !== null) hint.resumeOffset = Number(offset[1])
+  return hint
+}
+
+function markerFor(
+  result: ModelToolResult,
+  text: string,
+  excerpt: string | undefined,
+): ModelToolResult {
+  return {
+    ...result,
+    output: {
+      type: "json",
+      value: {
+        [PRUNED_KEY]: true,
+        reason: "request-over-budget",
+        toolName: result.toolName,
+        originalBytes: Buffer.byteLength(text, "utf-8"),
+        ...recoveryHint(text),
+        ...(excerpt === undefined ? {} : { excerpt }),
+      },
+    },
   }
-  if (userIndices.length <= PRESERVE_TURNS) return messages
+}
 
-  const preserveStart = userIndices[userIndices.length - PRESERVE_TURNS]
+/** Index of the last user message, or -1 when there is none. */
+function lastUserIndexOf(messages: readonly ProjectionMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") return i
+  }
+  return -1
+}
 
-  let cumulative = 0
-  return messages.map((message, i) => {
-    if (message.role !== "tool") return message
+/**
+ * Whether this result may be withheld from the request. Failure evidence and
+ * `tool_error` results are never withheld; only `text` output is reducible
+ * (markers are `json`, so this is also what makes the projection idempotent).
+ */
+function isReducible(message: ProjectionMessage, result: ModelToolResult): boolean {
+  if (message.failureEvidence === true) return false
+  return result.output.type === "text"
+}
 
-    let changed = false
-    const content: ModelToolResult[] = (message.content as ModelToolResult[]).map(result => {
-      // Errors are preserved — they are the repair loop's signal.
-      if (result.output.type === "tool_error") return result
-      if (result.output.type !== "text") return result
-      if (result.output.text === PLACEHOLDER) return result
+function textOf(result: ModelToolResult): string {
+  return result.output.type === "text" ? result.output.text : ""
+}
 
-      if (i < preserveStart) {
-        changed = true
-        return { ...result, output: { type: "text" as const, text: PLACEHOLDER } }
+/** Strips Agent-local metadata; the result is what the provider receives. */
+function toModelMessages(messages: readonly ProjectionMessage[]): ModelMessage[] {
+  return messages.map(({ role, content }) => ({ role, content }) as ModelMessage)
+}
+
+/**
+ * Request-time context safety.
+ *
+ * Responsibilities (mechanism 2) — reduce an over-budget *request projection*
+ * so the model call fits its input budget. This function never mutates durable
+ * history, never runs on a turn-count rule, and never withholds failure
+ * evidence. Emitting a smaller durable history is compaction's job.
+ *
+ * Trigger vs target: the decision to *enter* reduction uses
+ * `max(lastInputTokens, estimateTokens(projection))`, because provider usage is
+ * the more accurate signal when it is available. The reduction *target* is
+ * `estimateTokens(projection) <= inputBudget` alone — `lastInputTokens`
+ * describes a request already sent and cannot be reduced by rebuilding the
+ * current one, so targeting it would over-reduce or never terminate.
+ *
+ * Reduction order:
+ *   1. withhold the oldest reducible results, oldest first;
+ *   2. if the newest result alone is still too large, keep it represented as a
+ *      marker that carries an excerpt and its recovery affordances.
+ *
+ * Terminates when the projection fits or no reducible content remains.
+ *
+ * Omitting `context` means no budget is known, so no pressure can be shown and
+ * the projection is returned unchanged.
+ */
+export function pruneOldToolOutputs(
+  messages: readonly ProjectionMessage[],
+  context?: PruneContext,
+): ModelMessage[] {
+  if (messages.length === 0) return toModelMessages(messages)
+  if (context === undefined) return messages.map(({ role, content }) => ({ role, content }) as ModelMessage)
+
+  const projection: ProjectionMessage[] = messages.map(message => ({ ...message }))
+  const safety = Math.max(context.lastInputTokens ?? 0, estimateTokens(toModelMessages(projection)))
+  if (safety <= context.inputBudget) return toModelMessages(projection)
+
+  const fits = (): boolean => estimateTokens(toModelMessages(projection)) <= context.inputBudget
+  const lastUserIndex = lastUserIndexOf(projection)
+
+  // Stage 1 — withhold the oldest reducible results. Everything in the current
+  // user turn is protected, as are failure-evidence turns and tool errors.
+  for (let i = 0; i < projection.length && !fits(); i++) {
+    if (i >= lastUserIndex && lastUserIndex !== -1) break
+    const message = projection[i]
+    if (message.role !== "tool") continue
+    const count = (message.content as readonly ModelToolResult[]).length
+    for (let r = 0; r < count; r++) {
+      if (fits()) break
+      // Re-read from the projection: an earlier iteration of this inner loop
+      // may already have replaced a sibling result, and rebuilding from a
+      // stale array would silently discard that reduction.
+      const current = projection[i].content as readonly ModelToolResult[]
+      const result = current[r]
+      if (!isReducible(projection[i], result)) continue
+      projection[i] = {
+        ...projection[i],
+        content: current.map((candidate, ri) =>
+          ri === r ? markerFor(result, textOf(result), undefined) : candidate,
+        ),
+      } as ProjectionMessage
+    }
+  }
+
+  // Stage 2 — the newest result alone still does not fit. Keep it represented
+  // but shrink it, retaining an excerpt and any recovery affordance instead of
+  // withholding it entirely.
+  if (!fits()) {
+    for (let i = projection.length - 1; i >= 0; i--) {
+      const message = projection[i]
+      if (message.role !== "tool") continue
+      const content = message.content as readonly ModelToolResult[]
+      for (let r = content.length - 1; r >= 0; r--) {
+        const result = content[r]
+        if (!isReducible(message, result)) continue
+        const text = textOf(result)
+        // Derive the reduction from the estimator and the budget — never from
+        // an arbitrary byte constant.
+        const excessChars = Math.max(0, (estimateTokens(toModelMessages(projection)) - context.inputBudget) * 4)
+        const keepChars = Math.max(0, text.length - excessChars)
+        const shrink = (excerpt: string | undefined): void => {
+          projection[i] = {
+            ...projection[i],
+            content: content.map((candidate, ri) => (ri === r ? markerFor(result, text, excerpt) : candidate)),
+          } as ProjectionMessage
+        }
+        shrink(keepChars > 0 ? text.slice(0, keepChars) : undefined)
+        // The marker's own metadata costs tokens; drop the excerpt if that is
+        // what it takes to fit. Deterministic, two steps, then stop.
+        if (!fits() && keepChars > 0) shrink(undefined)
+        break
       }
+      break
+    }
+  }
 
-      cumulative += Buffer.byteLength(result.output.text, "utf-8")
-      if (cumulative > CAP_BYTES) {
-        changed = true
-        return { ...result, output: { type: "text" as const, text: PLACEHOLDER } }
-      }
-      return result
-    })
-
-    return changed ? { ...message, content } : message
-  })
+  return toModelMessages(projection)
 }

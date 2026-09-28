@@ -1,4 +1,4 @@
-import type { ModelLimits } from "@minicode/model"
+import type { ModelLimits, ModelMessage } from "@minicode/model"
 
 /** Token budgets derived from a model's limits. */
 export interface ContextBudget {
@@ -16,9 +16,9 @@ export interface ContextBudget {
  * own `maxOutputTokens`.
  *
  * This is the Runtime-owned context-budget arithmetic (the model package
- * deliberately does not carry context policy). Deciding *when* to compact,
- * estimating tokens, and rebuilding requests are further Runtime
- * responsibilities.
+ * deliberately does not carry context policy). Deciding *when* to compact
+ * and rebuilding requests are further Runtime responsibilities; token
+ * estimation lives here too, as {@link estimateTokens}.
  *
  * ```txt
  * 128000 context + no max output  → input 96000 / output 32000
@@ -33,4 +33,16 @@ export function contextBudget(limits: ModelLimits): ContextBudget {
       limits.maxOutputTokens,
     ),
   }
+}
+
+/**
+ * The single token estimator for the Runtime: `ceil(JSON chars / 4)`.
+ *
+ * Deliberately a heuristic — the repository has no tokenizer dependency, and
+ * provider-reported usage only arrives *after* a response. Request-time
+ * context safety therefore has to be estimated; this is the one place that
+ * happens, so no second estimator may be introduced.
+ */
+export function estimateTokens(messages: readonly ModelMessage[]): number {
+  return Math.ceil(JSON.stringify(messages).length / 4)
 }

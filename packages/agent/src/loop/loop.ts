@@ -140,9 +140,13 @@ export class AgentLoop {
       if (autoCompact.enabled) {
         const threshold = Math.floor(budget.inputBudget * (autoCompact.thresholdPct / 100))
         if (lastInputTokens >= threshold && lastInputTokens > 0) {
-          const removed = await compactor.compact(this.session)
+          const outcome = await compactor.compact(this.session)
           await this.session.checkpoint()
-          emit({ type: "compaction", summarizedMessages: removed })
+          // Proactive compaction is best-effort: a failure here is not fatal,
+          // because the reactive and provider paths still guard the request.
+          if (outcome.status === "compacted") {
+            emit({ type: "compaction", summarizedMessages: outcome.removed })
+          }
         }
       }
 
@@ -161,7 +165,10 @@ export class AgentLoop {
       let steered: string | null = null
       try {
         const stream = this.model.stream({
-          messages: this.session.toRequestMessages(),
+          messages: this.session.toRequestMessages({
+            lastInputTokens,
+            inputBudget: budget.inputBudget,
+          }),
           tools: toModelTools(this.tools),
           // Per-request output ceiling from the locked 75/25 budget.
           maxOutputTokens: budget.outputBudget,
@@ -211,13 +218,23 @@ export class AgentLoop {
               return { aborted: false, finishReason: "error", iterations, inputTokens, outputTokens, error: err.message }
             }
             compactionRetries += 1
-            const removed = await compactor.compact(this.session)
+            const outcome = await compactor.compact(this.session)
             await this.session.checkpoint()
-            if (removed > 0) {
+            if (outcome.status === "compacted") {
               iterations -= 1 // the retried attempt replaces this one
               continue
             }
-            return { aborted: false, finishReason: "error", iterations, inputTokens, outputTokens, error: err.message }
+            return {
+              aborted: false,
+              finishReason: "error",
+              iterations,
+              inputTokens,
+              outputTokens,
+              error:
+                outcome.status === "failed"
+                  ? `context overflow: compaction failed (${outcome.error})`
+                  : `context overflow: compaction made no progress (${outcome.reason})`,
+            }
           }
           // Auto-retry: transient provider throttling gets a
           // bounded sequence of delayed retries (surfaced via auto_retry).
@@ -319,17 +336,21 @@ export class AgentLoop {
       // Reactive overflow: the input budget is spent — compact before the
       // next request. If compaction is impossible, stop deterministically.
       if (compactor.isOverflow(response.usage)) {
-        const removed = await compactor.compact(this.session)
+        const outcome = await compactor.compact(this.session)
         await this.session.checkpoint()
-        emit({ type: "compaction", summarizedMessages: removed })
-        if (removed === 0) {
+        if (outcome.status === "compacted") {
+          emit({ type: "compaction", summarizedMessages: outcome.removed })
+        } else {
           return {
             aborted: false,
             finishReason: "error",
             iterations,
             inputTokens,
             outputTokens,
-            error: "context overflow detected but compaction made no progress",
+            error:
+              outcome.status === "failed"
+                ? `context overflow detected but compaction failed: ${outcome.error}`
+                : `context overflow detected but compaction made no progress: ${outcome.reason}`,
           }
         }
       }

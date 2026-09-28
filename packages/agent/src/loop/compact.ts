@@ -1,6 +1,7 @@
 import type { Model, ModelMessage, ModelUsage } from "@minicode/model"
-import { contextBudget } from "../context-budget"
+import { contextBudget, estimateTokens } from "../context-budget"
 import type { Session } from "../session/session"
+import type { SessionMessage } from "../session/types"
 
 const PRESERVE_MIN_TOKENS = 2000
 const PRESERVE_MAX_TOKENS = 8000
@@ -15,16 +16,36 @@ const SUMMARY_PROMPT = `Summarize the conversation above. Include:
 
 Be concise. Keep exact file paths, commands, and identifiers.`
 
+/** Appended when older history had to be dropped to fit the summary request. */
+const ELISION_NOTICE = `Note: earlier messages were omitted before this point because they exceeded the summarization input limit. Summarize only what is shown above and do not claim to cover the omitted portion.`
+
 /**
- * Reactive context management:
+ * The result of one compaction attempt.
+ *
+ * `no-progress` and `failed` are deliberately distinct: the first means the
+ * history holds nothing summarizable, the second means the summarization call
+ * itself did not succeed. Collapsing them (as a numeric `0` did) makes a real
+ * failure indistinguishable from a healthy no-op in the run's error report.
+ */
+export type CompactionOutcome =
+  | { readonly status: "compacted"; readonly removed: number }
+  | {
+      readonly status: "no-progress"
+      readonly reason: "no-compactable-region" | "empty-tail" | "empty-summary"
+    }
+  | { readonly status: "failed"; readonly error: string }
+
+/**
+ * Reactive context management (mechanism 3):
  *
  * - `isOverflow`: the last model call's reported input usage reached the
  *   75% input budget — the next call cannot fit, so compact now.
  * - `compact`: LLM-summarize the older turns (all but a preserved recent
  *   tail) into a single user message and splice it into history.
  *
- * Deliberately no pre-request token estimation: v0.1 keeps the baseline
- * simple and the 75/25 policy defines the only threshold.
+ * The summarization request is bounded by the same `contextBudget()` that
+ * defines every other budget: recovery must not be able to fail for the same
+ * reason that triggered it.
  */
 export class Compactor {
   constructor(
@@ -35,13 +56,12 @@ export class Compactor {
   isOverflow(usage: ModelUsage | undefined): boolean {
     if (this.contextWindow === undefined) return false
     if (usage === undefined || usage.inputTokens === undefined) return false
-    const inputBudget = contextBudget({ contextWindow: this.contextWindow, maxOutputTokens: 1 }).inputBudget
-    return usage.inputTokens >= inputBudget
+    return usage.inputTokens >= this.budgets().inputBudget
   }
 
-  /** Rewrites history around an LLM summary and returns the number of
-   *  messages removed (0 = no progress). Never throws. */
-  async compact(session: Session): Promise<number> {
+  /** Rewrites history around an LLM summary. Never throws — every failure is
+   *  reported through {@link CompactionOutcome} instead of a bare `0`. */
+  async compact(session: Session): Promise<CompactionOutcome> {
     const messages = session.messages
     // The compactable region is everything UP TO AND INCLUDING the last
     // user message; the trailing in-progress turn (assistant/tool messages
@@ -53,18 +73,21 @@ export class Compactor {
         break
       }
     }
-    if (lastUserIdx < 0 || lastUserIdx === messages.length - 1) return 0
+    if (lastUserIdx < 0 || lastUserIdx === messages.length - 1) {
+      return { status: "no-progress", reason: "no-compactable-region" }
+    }
 
     const compactable = messages.slice(0, lastUserIdx + 1)
     const preserved = selectPreservedTail(compactable, this.preserveBudgetTokens())
-    if (preserved <= 0) return 0
+    if (preserved <= 0) return { status: "no-progress", reason: "empty-tail" }
 
     const older = compactable.slice(0, preserved)
-    if (older.length === 0) return 0
+    if (older.length === 0) return { status: "no-progress", reason: "empty-tail" }
 
+    const { messages: summarized, elided } = this.boundSummaryInput(older)
     const summaryMessages: ModelMessage[] = [
-      ...older.map(m => ({ role: m.role, content: m.content }) as ModelMessage),
-      { role: "user", content: SUMMARY_PROMPT },
+      ...summarized.map(m => ({ role: m.role, content: m.content }) as ModelMessage),
+      { role: "user", content: elided ? `${SUMMARY_PROMPT}\n\n${ELISION_NOTICE}` : SUMMARY_PROMPT },
     ]
 
     let summary: string
@@ -72,14 +95,17 @@ export class Compactor {
       const result = await this.model.generate({
         messages: summaryMessages,
         temperature: 0,
+        // Explicit output headroom: the summary must fit the response budget,
+        // not the provider's default cap.
+        maxOutputTokens: this.budgets().outputBudget,
       })
       summary = result.content
-    } catch {
-      // A failed summarization leaves history untouched; the caller decides
-      // whether to stop rather than risk an unrecoverable overflow loop.
-      return 0
+    } catch (err) {
+      // A failed summarization leaves history untouched; report why rather
+      // than pretending no progress was possible.
+      return { status: "failed", error: err instanceof Error ? err.message : String(err) }
     }
-    if (summary.trim().length === 0) return 0
+    if (summary.trim().length === 0) return { status: "no-progress", reason: "empty-summary" }
 
     const summaryMessage: ModelMessage = {
       role: "user",
@@ -87,14 +113,51 @@ export class Compactor {
     }
     const tail = messages.slice(preserved)
     session.replaceMessages([summaryMessage, ...tail])
-    return older.length
+    return { status: "compacted", removed: older.length }
+  }
+
+  /**
+   * Both budgets, from the one policy in `contextBudget()`. `maxOutputTokens`
+   * is passed as the window itself so the model's own cap does not bind here —
+   * the 75/25 split is the only rule applied.
+   */
+  private budgets(): { inputBudget: number; outputBudget: number } {
+    const contextWindow = this.contextWindow ?? 0
+    return contextBudget({ contextWindow, maxOutputTokens: contextWindow })
+  }
+
+  /** Tokens the summarization request may consume, leaving output headroom. */
+  private summaryInputBudget(): number {
+    if (this.contextWindow === undefined) return PRESERVE_MAX_TOKENS
+    return this.budgets().inputBudget - this.budgets().outputBudget
+  }
+
+  /**
+   * Drops the OLDEST messages until the summarization request fits, and
+   * reports whether anything was dropped so the caller can disclose it. The
+   * model is never handed a partial history presented as complete.
+   */
+  private boundSummaryInput(older: readonly SessionMessage[]): {
+    messages: SessionMessage[]
+    elided: boolean
+  } {
+    const budget = this.summaryInputBudget()
+    const cost = (from: number): number =>
+      estimateTokens([
+        ...older.slice(from).map(m => ({ role: m.role, content: m.content }) as ModelMessage),
+        { role: "user", content: SUMMARY_PROMPT },
+      ])
+
+    let start = 0
+    while (start < older.length - 1 && cost(start) > budget) start++
+    return { messages: older.slice(start), elided: start > 0 }
   }
 
   /** Recent-turn budget: 25% of the 75/25 input budget, clamped to
    *  [2000, 8000] estimated tokens (chars / 4). */
   private preserveBudgetTokens(): number {
     if (this.contextWindow === undefined) return PRESERVE_MAX_TOKENS
-    const inputBudget = contextBudget({ contextWindow: this.contextWindow, maxOutputTokens: 1 }).inputBudget
+    const inputBudget = this.budgets().inputBudget
     return Math.max(PRESERVE_MIN_TOKENS, Math.min(PRESERVE_MAX_TOKENS, Math.floor(inputBudget * PRESERVE_BUDGET_RATIO)))
   }
 }
@@ -117,8 +180,4 @@ function selectPreservedTail(messages: ModelMessage[], budgetTokens: number): nu
     kept = start
   }
   return kept
-}
-
-function estimateTokens(messages: ModelMessage[]): number {
-  return Math.ceil(JSON.stringify(messages).length / 4)
 }

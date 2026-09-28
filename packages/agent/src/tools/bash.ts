@@ -106,7 +106,13 @@ export const bashTool: Tool = {
       }
     }
 
-    return { ok: true, data: `${truncate(result.stdout, result.stderr)}\n(exit code: ${result.exitCode})` }
+    // A non-zero exit is `ok: true` — exit codes are data, not tool errors.
+    // The text stays byte-identical; `failureEvidence` only records that the
+    // command *observed* a failure, so request-time pruning keeps it.
+    const data = `${truncate(result.stdout, result.stderr)}\n(exit code: ${result.exitCode})`
+    return result.exitCode === 0
+      ? { ok: true, data }
+      : { ok: true, data, failureEvidence: true }
   },
 }
 

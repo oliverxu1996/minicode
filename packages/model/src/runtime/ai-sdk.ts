@@ -244,6 +244,15 @@ function classify(error: unknown): Failure {
     if (status === 401 || status === 403) {
       return { code: "authentication_failed", retryable: false }
     }
+    // Context overflow is checked BEFORE overload: a provider can report an
+    // over-window request in a body that also contains overload wording
+    // ("overloaded", "rate limit"), and misclassifying it as retryable would
+    // retry the same over-window request without ever compacting. The gate is
+    // still the context-exceeded status restriction (400/413) — overload and
+    // 429/5xx responses are not reclassified as context overflow.
+    if (isContextExceeded(error)) {
+      return { code: "context_exceeded", retryable: false }
+    }
     // Providers report transient overload/limit conditions with assorted
     // status codes and body codes (e.g. BigModel 1302/1305 with HTTP 400);
     // they are retryable regardless of the HTTP status.
@@ -255,9 +264,6 @@ function classify(error: unknown): Failure {
     }
     if (status !== undefined && status >= 500) {
       return { code: "request_failed", retryable: true, retryAfterMs }
-    }
-    if (isContextExceeded(error)) {
-      return { code: "context_exceeded", retryable: false }
     }
     // A protocol violation reported over a successful HTTP response: the
     // provider answered 2xx but the payload does not match its own API.
