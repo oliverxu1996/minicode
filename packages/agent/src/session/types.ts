@@ -131,7 +131,18 @@ export type RunEvent =
   | { type: "model_response"; iteration: number; finishReason: string; usage?: ModelUsage }
   | { type: "tool_call"; iteration: number; toolCallId: string; name: string; input: Record<string, unknown> }
   | { type: "tool_progress"; iteration: number; toolCallId: string; name: string; text: string }
-  | { type: "tool_result"; iteration: number; toolCallId: string; name: string; ok: boolean; result: string }
+  | {
+      type: "tool_result"
+      iteration: number
+      toolCallId: string
+      name: string
+      ok: boolean
+      result: string
+      /** Derived from the ledger's own timestamps. Absent when the runtime did
+       *  not record both ends of the interval — an unknown duration stays
+       *  unknown rather than reading as an instant one. */
+      durationMs?: number
+    }
   | { type: "compaction"; summarizedMessages: number }
   | {
       type: "auto_retry"

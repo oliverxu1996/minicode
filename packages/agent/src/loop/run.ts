@@ -1,4 +1,5 @@
 import type { Model, ModelResponse, ModelUsage } from "@minicode/model"
+import { toolDurationMs } from "../session/ledger"
 import type { Session } from "../session/session"
 import type {
   ModelIdentity,
@@ -262,6 +263,11 @@ export async function executeTool(
   // separate a recorded outcome from its tool-result part.
   await session.checkpoint()
 
+  // Derived, not stored: the ledger's timestamps stay the durable source, and
+  // an invocation that recorded only one end reports no duration at all.
+  const entry = session.ledger.get(toolCallId)
+  const durationMs = entry === undefined ? undefined : toolDurationMs(entry)
+
   emit({
     type: "tool_result",
     iteration: opts.iteration,
@@ -269,6 +275,7 @@ export async function executeTool(
     name,
     ok: truncated.ok,
     result: truncated.ok ? truncated.data : truncated.error ?? "",
+    ...(durationMs === undefined ? {} : { durationMs }),
   })
 }
 

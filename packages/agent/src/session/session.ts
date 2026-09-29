@@ -380,7 +380,14 @@ export class Session {
     if (this.ledger.get(toolCallId) === undefined) {
       this.ledger.pending({ toolCallId, name, input: {} })
     }
-    this.ledger.finished(toolCallId, "failed", { note: UNKNOWN_OUTCOME_ERROR })
+    // The outcome is unknown, and so is the interval: a start recorded before
+    // the restart does not bound an invocation that never finished. Erase it
+    // rather than leave a pair whose difference would read as a duration
+    // spanning the downtime.
+    this.ledger.finished(toolCallId, "failed", {
+      note: UNKNOWN_OUTCOME_ERROR,
+      startedAt: undefined,
+    })
   }
 
   private findAssistantWithCall(toolCallId: string): (SessionMessage & { role: "assistant" }) | undefined {

@@ -11,6 +11,23 @@ export interface ToolLedgerEntry {
 }
 
 /**
+ * How long a tool invocation took, derived from the timestamps the ledger
+ * already records.
+ *
+ * Deliberately not a stored field: `startedAt` and `finishedAt` remain the one
+ * durable source, and the duration is computed from them on read.
+ *
+ * A missing end yields `undefined`, never `0`. An invocation that never
+ * recorded both ends of its interval — one reconciled to an unknown outcome,
+ * or one rearmed for reissue — has no known duration, and reporting an instant
+ * one would be a fabrication.
+ */
+export function toolDurationMs(entry: ToolLedgerEntry): number | undefined {
+  if (entry.startedAt === undefined || entry.finishedAt === undefined) return undefined
+  return entry.finishedAt - entry.startedAt
+}
+
+/**
  * Durable record of every tool invocation in a session.
  *
  * Explicit transitions:
@@ -67,11 +84,16 @@ export class ToolLedger {
     if (note !== undefined) entry.note = note
   }
 
-  /** Finalize an entry as succeeded or failed. A final state is terminal. */
+  /** Finalize an entry as succeeded or failed. A final state is terminal.
+   *
+   *  `meta.startedAt` states what the caller knows about the start: recovery
+   *  passes `undefined` to erase a start that no longer bounds the invocation,
+   *  because it predates the restart that lost the outcome. Omitting the key
+   *  leaves the recorded start untouched. */
   finished(
     toolCallId: string,
     outcome: "succeeded" | "failed",
-    meta: { finishedAt?: number; note?: string } = {},
+    meta: { finishedAt?: number; startedAt?: number; note?: string } = {},
   ): void {
     const entry = this.require(toolCallId)
     if (entry.status !== "running" && entry.status !== "pending") {
@@ -79,6 +101,7 @@ export class ToolLedger {
     }
     entry.status = outcome
     entry.finishedAt = meta.finishedAt ?? Date.now()
+    if ("startedAt" in meta) entry.startedAt = meta.startedAt
     if (meta.note !== undefined) entry.note = meta.note
   }
 

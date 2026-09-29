@@ -6,7 +6,7 @@ import type { Model } from "@minicode/model"
 import { MiniCode } from "./minicode"
 import { Session, UNKNOWN_OUTCOME_ERROR } from "./session/session"
 import { SessionStore } from "./session/store"
-import { ToolLedger } from "./session/ledger"
+import { ToolLedger, toolDurationMs } from "./session/ledger"
 import { CODING_TOOLS } from "./tools"
 import { executeTool } from "./loop/run"
 import { FakeModel, textResponse } from "./testing"
@@ -243,6 +243,78 @@ describe("Usage detail persistence (O1)", () => {
       cacheWriteTokens: 50,
       reasoningTokens: 7,
     })
+    cleanup()
+  })
+})
+
+describe("Tool duration (O3)", () => {
+  // Derived from the ledger's own timestamps, which stay the durable source.
+  // A duration the runtime has no evidence for must stay unknown — never 0.
+
+  test("a completed invocation reports the interval it actually spanned", () => {
+    const ledger = new ToolLedger()
+    ledger.pending({ toolCallId: "c1", name: "bash", input: {} })
+    ledger.running("c1", { startedAt: 1_000 })
+    ledger.finished("c1", "succeeded", { finishedAt: 1_450 })
+
+    expect(toolDurationMs(ledger.get("c1")!)).toBe(450)
+  })
+
+  test("an invocation that never started reports no duration", () => {
+    const ledger = new ToolLedger()
+    ledger.pending({ toolCallId: "c1", name: "bash", input: {} })
+    ledger.finished("c1", "failed", { finishedAt: 1_450 })
+
+    expect(ledger.get("c1")!.startedAt).toBeUndefined()
+    expect(toolDurationMs(ledger.get("c1")!)).toBeUndefined()
+  })
+
+  test("an invocation that never finished reports no duration", () => {
+    const ledger = new ToolLedger()
+    ledger.pending({ toolCallId: "c1", name: "bash", input: {} })
+    ledger.running("c1", { startedAt: 1_000 })
+
+    expect(toolDurationMs(ledger.get("c1")!)).toBeUndefined()
+  })
+
+  test("a reissued invocation is not measured across the gap", () => {
+    const ledger = new ToolLedger()
+    ledger.pending({ toolCallId: "c1", name: "read", input: {} })
+    ledger.running("c1", { startedAt: 1_000 })
+    ledger.reissue("c1", "previous outcome unknown; idempotent tool reissued after restart")
+
+    // Reissue erases the interval: nothing pairs the stale start with a later
+    // end, so the gap is not reported as execution time.
+    expect(toolDurationMs(ledger.get("c1")!)).toBeUndefined()
+
+    // The re-execution reports its own interval, not the one spanning the gap.
+    ledger.running("c1", { startedAt: 5_000 })
+    ledger.finished("c1", "succeeded", { finishedAt: 5_450 })
+    expect(toolDurationMs(ledger.get("c1")!)).toBe(450)
+  })
+
+  test("an unknown outcome across a restart manufactures no duration", async () => {
+    const { agent, reloadAsNewProcess, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+    await session.checkpoint()
+    const assistant = session.appendAssistant(
+      [{ type: "tool_call", toolCallId: "call_1", toolName: "edit", input: { filePath: "x.ts" } }],
+      { finishReason: "tool_call" },
+    )
+    session.toolResultMessageFor(assistant)
+    session.ledger.pending({ toolCallId: "call_1", name: "edit", input: { filePath: "x.ts" } })
+    session.ledger.running("call_1", { startedAt: 1_000 })
+
+    session.status = "running" // crash mid-run, after the tool started
+    const persisted = await reloadAsNewProcess(session)
+    await persisted.recover({ tools: CODING_TOOLS })
+
+    const entry = persisted.ledger.get("call_1")!
+    // Existing outcome semantics are untouched…
+    expect(entry.status).toBe("failed")
+    expect(entry.note).toBe(UNKNOWN_OUTCOME_ERROR)
+    // …and the invocation that never finished has no interval to report.
+    expect(toolDurationMs(entry)).toBeUndefined()
     cleanup()
   })
 })

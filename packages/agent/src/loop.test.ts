@@ -495,3 +495,96 @@ describe("Run record (O2)", () => {
     cleanup()
   })
 })
+
+describe("Tool duration and per-run counts (O3)", () => {
+  test("a tool_result reports the interval the ledger recorded", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse([{ toolCallId: "call_1", toolName: "ls", input: { path: "." } }]),
+      textResponse("done"),
+    ]))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    await agent.run(session, "list the files", { onEvent: event => events.push(event) })
+
+    const result = events.find(event => event.type === "tool_result")
+    if (result?.type !== "tool_result") throw new Error("expected a tool_result")
+
+    // The event agrees with the durable pair it was derived from.
+    const entry = session.ledger.get("call_1")!
+    expect(result.durationMs).toBe(entry.finishedAt! - entry.startedAt!)
+    expect(typeof result.durationMs).toBe("number")
+    cleanup()
+  })
+
+  test("a run counts exactly the tool results it produced", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([
+      // Three distinct calls in one assistant turn: three tool results across
+      // two iterations, so the count cannot be the iteration count.
+      toolCallResponse([
+        { toolCallId: "call_1", toolName: "ls", input: { path: "." } },
+        { toolCallId: "call_2", toolName: "bash", input: { command: "echo a" } },
+        { toolCallId: "call_3", toolName: "bash", input: { command: "echo b" } },
+      ]),
+      textResponse("done"),
+    ]))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    const result = await agent.run(session, "look around", { onEvent: event => events.push(event) })
+
+    expect(events.filter(event => event.type === "tool_result")).toHaveLength(3)
+    expect(result.iterations).toBe(2)
+    expect(session.runs[0]!.toolCalls).toBe(3)
+    cleanup()
+  })
+
+  test("tool counts are scoped to the run, not the session", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse([{ toolCallId: "call_1", toolName: "ls", input: { path: "." } }]),
+      textResponse("first"),
+      toolCallResponse([
+        { toolCallId: "call_2", toolName: "bash", input: { command: "echo a" } },
+        { toolCallId: "call_3", toolName: "bash", input: { command: "echo b" } },
+      ]),
+      textResponse("second"),
+    ]))
+    const session = agent.createSession(dir)
+
+    await agent.run(session, "first task")
+    await agent.run(session, "second task")
+
+    // The ledger is session-scoped and holds every invocation…
+    expect(session.ledger.all).toHaveLength(3)
+    // …while each run counts only its own.
+    expect(session.runs[0]!.toolCalls).toBe(1)
+    expect(session.runs[1]!.toolCalls).toBe(2)
+    cleanup()
+  })
+
+  test("observability does not change what a failing command means", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "exit 1" } }]),
+      textResponse("I could not fix it"),
+    ]))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    const result = await agent.run(session, "run the failing command", {
+      onEvent: event => events.push(event),
+    })
+
+    const toolResult = events.find(event => event.type === "tool_result")
+    if (toolResult?.type !== "tool_result") throw new Error("expected a tool_result")
+
+    // A non-zero exit stays `ok` — exit codes are data — and remains evidence.
+    expect(toolResult.ok).toBe(true)
+    expect(session.ledger.get("call_1")?.status).toBe("succeeded")
+    expect(session.messages.find(m => m.role === "tool")?.failureEvidence).toBe(true)
+    // The run still ends on the model's terms, not the command's exit code.
+    expect(result.finishReason).toBe("stop")
+    // The new observability rides alongside without altering any of it.
+    expect(typeof toolResult.durationMs).toBe("number")
+    cleanup()
+  })
+})
