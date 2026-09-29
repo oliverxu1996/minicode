@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ModelError } from "@minicode/model"
-import type { RunEvent } from "./session/types"
+import type { RunEvent, RunSummary } from "./session/types"
 import { FakeModel, textResponse, toolCallResponse } from "./testing"
 import { MiniCode } from "./minicode"
 
@@ -378,6 +378,120 @@ describe("Session durability (V2, AC6)", () => {
     expect(reloaded.messages.map(m => m.role)).toEqual(["user", "assistant", "tool", "assistant"])
     expect(reloaded.ledger.get("call_1")?.status).toBe("succeeded")
     expect(readFileSync(join(workspace, "a.txt"), "utf-8")).toBe("hi")
+    cleanup()
+  })
+})
+
+describe("Run record (O2)", () => {
+  test("a completed run records identity, timing, counts and usage", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse(
+        [{ toolCallId: "call_1", toolName: "ls", input: { path: "." } }],
+        { usage: { inputTokens: 1200, outputTokens: 40 } },
+      ),
+      textResponse("done", { usage: { inputTokens: 1500, outputTokens: 25 } }),
+    ]))
+    const session = agent.createSession(dir)
+
+    await agent.run(session, "list the files")
+
+    expect(session.runs).toHaveLength(1)
+    const run = session.runs[0]!
+    // The session id identifies the session, not the run: one session executes
+    // many tasks, and `--continue` deliberately reuses it.
+    expect(run.id).toEqual(expect.any(String))
+    expect(run.id).not.toBe(session.id)
+    expect(run.startedAt).toEqual(expect.any(Number))
+    expect(run.finishedAt!).toBeGreaterThanOrEqual(run.startedAt)
+    expect(run.finishReason).toBe("stop")
+    expect(run.model).toEqual({
+      id: "fake-model",
+      name: "Fake Model",
+      protocol: "openai",
+      model: "fake-model",
+      contextWindow: 128000,
+      maxOutputTokens: 32000,
+    })
+    // Summed over the run's two model calls.
+    expect(run.usage).toEqual({ inputTokens: 2700, outputTokens: 65 })
+    expect(run.modelCalls).toBe(2)
+    expect(run.toolCalls).toBe(1)
+    expect(run.error).toBeUndefined()
+    cleanup()
+  })
+
+  test("run events carry the run id and the completed record", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([textResponse("done")]))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    await agent.run(session, "do the task", { onEvent: event => events.push(event) })
+
+    const run = session.runs[0]!
+    const start = events.find(event => event.type === "run_start")
+    const end = events.find(event => event.type === "run_end")
+    if (start?.type !== "run_start" || end?.type !== "run_end") {
+      throw new Error("expected run boundary events")
+    }
+
+    // One id joins the events, the returned record, and the snapshot.
+    expect(start.runId).toBe(run.id)
+    expect(start.sessionId).toBe(session.id)
+    expect(start.model).toEqual(run.model)
+    expect(end.runId).toBe(run.id)
+    expect(end.run).toEqual(run)
+    cleanup()
+  })
+
+  test("a run that has not finished records no terminal facts", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([textResponse("done")]))
+    const session = agent.createSession(dir)
+
+    // Read the snapshot the moment the run starts: exactly the state a crash
+    // mid-run leaves on disk.
+    let onDisk: { runs?: RunSummary[] } | undefined
+    await agent.run(session, "do the task", {
+      onEvent: event => {
+        if (event.type !== "run_start" || onDisk !== undefined) return
+        onDisk = JSON.parse(readFileSync(join(dir, "sessions", `${session.id}.json`), "utf-8"))
+      },
+    })
+
+    const partial = onDisk?.runs?.[0]
+    if (partial === undefined) throw new Error("expected a run record on disk")
+    expect(partial.startedAt).toEqual(expect.any(Number))
+    expect(partial.model.id).toBe("fake-model")
+    // Nothing is fabricated for a run that never reached a terminal state.
+    expect(partial).not.toHaveProperty("finishedAt")
+    expect(partial).not.toHaveProperty("finishReason")
+    expect(partial).not.toHaveProperty("usage")
+    expect(partial).not.toHaveProperty("modelCalls")
+    expect(partial).not.toHaveProperty("toolCalls")
+    cleanup()
+  })
+
+  test("runs in one session stay separately identifiable, and survive reload", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([
+      textResponse("first", { usage: { inputTokens: 100, outputTokens: 10 } }),
+      textResponse("second", { usage: { inputTokens: 200, outputTokens: 20 } }),
+    ]))
+    const session = agent.createSession(dir)
+
+    await agent.run(session, "first task")
+    await agent.run(session, "second task")
+
+    expect(session.runs).toHaveLength(2)
+    const first = session.runs[0]!
+    const second = session.runs[1]!
+    expect(first.id).not.toBe(second.id)
+    expect(first.finishedAt!).toBeLessThanOrEqual(second.startedAt)
+    expect(first.usage).toEqual({ inputTokens: 100, outputTokens: 10 })
+    expect(second.usage).toEqual({ inputTokens: 200, outputTokens: 20 })
+
+    // Through a fresh runtime root, as a restarted process would read it.
+    const fresh = new MiniCode({ sessionsDir: join(dir, "sessions"), model })
+    const reloaded = await fresh.loadSession(session.id)
+    expect(reloaded.runs).toEqual(session.runs)
     cleanup()
   })
 })

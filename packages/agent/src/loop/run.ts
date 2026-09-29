@@ -1,6 +1,12 @@
-import type { Model, ModelResponse } from "@minicode/model"
+import type { Model, ModelResponse, ModelUsage } from "@minicode/model"
 import type { Session } from "../session/session"
-import type { RunEvent, RunFinishReason, SessionMessage } from "../session/types"
+import type {
+  ModelIdentity,
+  RunEvent,
+  RunFinishReason,
+  RunSummary,
+  SessionMessage,
+} from "../session/types"
 import { CODING_TOOLS } from "../tools"
 import { createSkillTool } from "../tools/skill"
 import type { Tool, ToolResult } from "../tools/types"
@@ -46,13 +52,40 @@ export interface RunResult {
  */
 export async function runTask(deps: RunDeps): Promise<RunResult> {
   const { session, model, task } = deps
-  const emit = deps.onEvent ?? (() => {})
+  const callerOnEvent = deps.onEvent
+
+  // This run's record. Only the facts known before it starts are written now;
+  // every terminal fact stays absent until the run actually ends, so a run
+  // that crashes or is interrupted keeps an honest record of what was known.
+  const runId = crypto.randomUUID()
+  const startedAt = Date.now()
+  const identity = modelIdentity(model)
+  const started: RunSummary = { id: runId, startedAt, model: identity }
+  session.runs.push(started)
+
+  // Counted from the run's own event stream rather than from loop internals,
+  // so the record and what an external JSONL consumer reads cannot disagree:
+  // `modelCalls` is the number of `model_response` events, `toolCalls` the
+  // number of `tool_result` events.
+  let modelCalls = 0
+  let toolCalls = 0
+  let usage: ModelUsage = {}
+
+  const emit = (event: RunEvent): void => {
+    if (event.type === "model_response") {
+      modelCalls += 1
+      usage = sumUsage(usage, event.usage)
+    } else if (event.type === "tool_result") {
+      toolCalls += 1
+    }
+    callerOnEvent?.(event)
+  }
 
   // Persist 'running' BEFORE execution: a crash mid-run leaves 'running'
-  // on disk for recovery to reconcile.
+  // on disk for recovery to reconcile, alongside this run's partial record.
   session.status = "running"
   await session.checkpoint()
-  emit({ type: "run_start", sessionId: session.id, task })
+  emit({ type: "run_start", sessionId: session.id, runId, task, model: identity })
 
   let result: RunResult
   try {
@@ -62,7 +95,7 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
       tools.set("skill", createSkillTool(deps.skills))
     }
     const loop = new AgentLoop(session, model, tools)
-    result = await loop.run(task, deps)
+    result = await loop.run(task, { ...deps, onEvent: emit })
   } catch (err) {
     // The loop is contractually non-throwing; this guards runtime bugs so a
     // session never stays stuck in 'running'.
@@ -77,22 +110,74 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
   // Terminal transitions: an aborted run leaves 'interrupted' for the next
   // process; a completed (even failed) run is idle.
   session.status = result.aborted ? "interrupted" : "idle"
+  const finished: RunSummary = {
+    ...started,
+    finishedAt: Date.now(),
+    finishReason: result.finishReason,
+    usage,
+    modelCalls,
+    toolCalls,
+    ...(result.error === undefined ? {} : { error: result.error }),
+  }
+  const index = session.runs.findIndex(run => run.id === runId)
+  if (index !== -1) session.runs[index] = finished
   try {
     await session.checkpoint()
   } catch {
     // Terminal persistence failure must not mask the run outcome.
   }
-  const usage = result.inputTokens !== undefined || result.outputTokens !== undefined
+  const legacyUsage = result.inputTokens !== undefined || result.outputTokens !== undefined
     ? { inputTokens: result.inputTokens, outputTokens: result.outputTokens }
     : undefined
   emit({
     type: "run_end",
+    runId,
     finishReason: result.finishReason,
     iterations: result.iterations,
-    usage,
+    usage: legacyUsage,
     error: result.error,
+    run: finished,
   })
   return result
+}
+
+/** The identity of a model, as recorded on a run. Credentials and the endpoint
+ *  are deliberately not part of it. */
+function modelIdentity(model: Model): ModelIdentity {
+  return {
+    id: model.id,
+    name: model.name,
+    protocol: model.protocol,
+    model: model.model,
+    contextWindow: model.limits.contextWindow,
+    maxOutputTokens: model.limits.maxOutputTokens,
+  }
+}
+
+/** Every token field of `ModelUsage`, so a field added later is summed too. */
+const USAGE_KEYS = [
+  "inputTokens",
+  "outputTokens",
+  "totalTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "reasoningTokens",
+] as const satisfies readonly (keyof ModelUsage)[]
+
+/** Adds one model call's usage into a run total.
+ *
+ *  Every field is summed independently: the cache and reasoning fields
+ *  decompose the two totals rather than adding to them, so their sums remain
+ *  subsets of the totals' sums. A field no call reported stays absent. */
+function sumUsage(total: ModelUsage, call: ModelUsage | undefined): ModelUsage {
+  if (call === undefined) return total
+  const summed: Record<string, number> = { ...total }
+  for (const key of USAGE_KEYS) {
+    const value = call[key]
+    if (value === undefined) continue
+    summed[key] = (summed[key] ?? 0) + value
+  }
+  return summed as ModelUsage
 }
 
 /**

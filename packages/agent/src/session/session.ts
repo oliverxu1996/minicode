@@ -1,5 +1,5 @@
 import type { ModelAssistantPart, ModelMessage, ModelToolResult, ModelUsage } from "@minicode/model"
-import type { SessionMessage, SessionStatus } from "./types"
+import type { ModelIdentity, RunSummary, SessionMessage, SessionStatus } from "./types"
 import { ToolLedger } from "./ledger"
 import { pruneOldToolOutputs } from "./prune"
 import type { PruneContext, ProjectionMessage } from "./prune"
@@ -53,6 +53,12 @@ export class Session {
   status: SessionStatus = "idle"
   updatedAt: number
   readonly messages: SessionMessage[] = []
+  /**
+   * Every run this session has executed, oldest first. A run is appended when
+   * it starts and replaced with its completed form when it ends, so a run
+   * interrupted by a crash keeps a record of what was known before it died.
+   */
+  readonly runs: RunSummary[] = []
   /** User-visible session name (set via /name). */
   title: string | null = null
   /** Set when this session was forked/cloned from another session. */
@@ -96,6 +102,7 @@ export class Session {
     if (typeof json.title === "string" && json.title.trim().length > 0) session.title = json.title
     if (typeof json.parentSessionId === "string") session.parentSessionId = json.parentSessionId
     session.messages.push(...parseMessages(json.messages))
+    session.runs.push(...parseRuns(json.runs))
     session.ledger.replaceAll(ToolLedger.fromJSON(json.ledger as never))
 
     // A persisted 'running' status in a fresh process is always a crash
@@ -118,6 +125,7 @@ export class Session {
       updatedAt: this.updatedAt,
       title: this.title,
       parentSessionId: this.parentSessionId,
+      runs: this.runs,
       ledger: this.ledger.toJSON(),
       messages: this.messages,
     }
@@ -399,6 +407,22 @@ function parseMessages(input: unknown): SessionMessage[] {
       status: "complete",
       timestamp: typeof msg.timestamp === "number" ? msg.timestamp : 0,
     } as SessionMessage)
+  }
+  return out
+}
+
+/** Parses persisted run records; anything malformed is skipped rather than
+ *  failing the whole session load. */
+function parseRuns(input: unknown): RunSummary[] {
+  if (!Array.isArray(input)) return []
+  const out: RunSummary[] = []
+  for (const raw of input) {
+    if (typeof raw !== "object" || raw === null) continue
+    const run = raw as Partial<RunSummary>
+    const model = run.model as Partial<ModelIdentity> | undefined
+    if (typeof run.id !== "string" || typeof run.startedAt !== "number") continue
+    if (typeof model !== "object" || model === null || typeof model.id !== "string") continue
+    out.push(raw as RunSummary)
   }
   return out
 }

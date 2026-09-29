@@ -40,6 +40,8 @@ export interface FakeModelLimits {
 export class FakeModel implements Model {
   readonly id: string
   readonly name: string
+  readonly protocol: Model["protocol"] = "openai"
+  readonly model = "fake-model"
   readonly limits: { contextWindow: number; maxOutputTokens: number }
   readonly requests: ModelRequest[] = []
   /** Estimated input tokens of each recorded request, in call order. */

@@ -247,6 +247,38 @@ describe("Usage detail persistence (O1)", () => {
   })
 })
 
+describe("Run record migration (O2)", () => {
+  test("a snapshot written before run records existed still loads", () => {
+    // Sessions persisted by an earlier version have no `runs` key at all; one
+    // must load as a session with no recorded runs, not fail.
+    const session = Session.fromJSON({
+      version: 1,
+      id: "s1",
+      cwd: "/tmp",
+      status: "idle",
+      messages: [],
+    })
+    expect(session.runs).toEqual([])
+  })
+
+  test("a malformed run record is skipped rather than failing the load", () => {
+    const session = Session.fromJSON({
+      version: 1,
+      id: "s1",
+      cwd: "/tmp",
+      status: "idle",
+      messages: [],
+      runs: [
+        { id: "run-1", startedAt: 1, model: { id: "m" } },
+        { startedAt: 2, model: { id: "m" } }, // no id
+        "not a record",
+      ],
+    })
+    expect(session.runs).toHaveLength(1)
+    expect(session.runs[0]!.id).toBe("run-1")
+  })
+})
+
 describe("Model resolution (V2)", () => {
   test("MiniCode without a configured model reports the missing dependency", async () => {
     const { dir, cleanup } = tempDir()

@@ -1,6 +1,7 @@
 import type {
   ModelAssistantPart,
   ModelFinishReason,
+  ModelProtocol,
   ModelToolResult,
   ModelUsage,
 } from "@minicode/model"
@@ -64,6 +65,50 @@ export type SessionMessage = UserMessage | AssistantMessage | ToolMessage
  */
 export type SessionStatus = "idle" | "running" | "interrupted"
 
+/**
+ * Which model produced a run.
+ *
+ * Identity only: enough to answer "what produced this?" without carrying the
+ * configuration. The endpoint and API key are deliberately absent — an
+ * endpoint can embed a credential in its URL, so neither ever reaches a
+ * snapshot or stdout.
+ */
+export interface ModelIdentity {
+  /** The local, user-chosen configuration key. Unique per configuration. */
+  readonly id: string
+  /** Human-readable display name. */
+  readonly name: string
+  readonly protocol: ModelProtocol
+  /** The identifier the provider API understands. */
+  readonly model: string
+  readonly contextWindow: number
+  readonly maxOutputTokens: number
+}
+
+/**
+ * One run's facts, recorded on the session it ran against.
+ *
+ * The record is written when the run starts and completed when it reaches a
+ * terminal state. Every terminal fact is optional and stays ABSENT for a run
+ * that crashed or was interrupted: a run that never finished reports only what
+ * was known before it died, and nothing is fabricated to fill the gap.
+ */
+export interface RunSummary {
+  readonly id: string
+  readonly startedAt: number
+  /** The model this run was executed against (resolved once, per run). */
+  readonly model: ModelIdentity
+  /** Absent until the run reaches a terminal state. */
+  readonly finishedAt?: number
+  readonly finishReason?: RunFinishReason
+  /** Run totals, summed over the run's model calls. Absent until finalized. */
+  readonly usage?: ModelUsage
+  readonly modelCalls?: number
+  readonly toolCalls?: number
+  /** Present only when the run ended in an error. */
+  readonly error?: string
+}
+
 /** Why a run ended. `stop` is the model's own final answer; the rest are
  *  runtime-enforced truncations or failures. */
 export type RunFinishReason =
@@ -78,7 +123,7 @@ export type RunFinishReason =
 /** Observability event emitted during a run. Enough to reconstruct what
  *  happened without reading the transcript. */
 export type RunEvent =
-  | { type: "run_start"; sessionId: string; task: string }
+  | { type: "run_start"; sessionId: string; runId: string; task: string; model: ModelIdentity }
   | { type: "iteration_start"; iteration: number }
   | { type: "assistant_delta"; iteration: number; text: string }
   | { type: "reasoning_delta"; iteration: number; text: string }
@@ -96,4 +141,14 @@ export type RunEvent =
       errorMessage: string
     }
   | { type: "recovery"; note: string }
-  | { type: "run_end"; finishReason: RunFinishReason; iterations: number; usage?: ModelUsage; error?: string }
+  | {
+      type: "run_end"
+      runId: string
+      finishReason: RunFinishReason
+      iterations: number
+      usage?: ModelUsage
+      error?: string
+      /** The completed run record — the same shape the session persists, so a
+       *  JSONL consumer and a snapshot reader agree without a mapping layer. */
+      run: RunSummary
+    }

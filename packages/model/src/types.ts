@@ -275,6 +275,12 @@ export interface Model {
   /** Human-readable display name. */
   readonly name: string
 
+  /** API protocol this model speaks. */
+  readonly protocol: ModelProtocol
+
+  /** Model identifier as the provider API understands it. */
+  readonly model: string
+
   /** Token limits of this model. */
   readonly limits: ModelLimits
 
