@@ -4,11 +4,14 @@ import type { Model, ModelEvent, ModelMessage } from "./index"
 import {
   TEST_API_KEY,
   activeModelViaManager,
+  anthropicDetailedUsageResponse,
   anthropicStreamEvents,
   anthropicTextResponse,
   anthropicToolUseResponse,
   hangingStream,
   openaiChunk,
+  openaiDetailedUsageChunk,
+  openaiDetailedUsageResponse,
   openaiTextResponse,
   openaiToolCallResponse,
   openaiUsageChunk,
@@ -836,6 +839,175 @@ describe("canonical history: anthropic conversion", () => {
             is_error: true,
           },
         ])
+      } finally {
+        await provider.close()
+      }
+    })
+  })
+})
+
+describe("usage detail: cache and reasoning", () => {
+  // The provider reports a breakdown of the two token totals. It must survive
+  // normalization, and it must never be folded into those totals.
+
+  test("openai: cache read and reasoning survive normalization", async () => {
+    await withConfigDir(async () => {
+      const provider = await startMockProvider(() =>
+        openaiDetailedUsageResponse("Hello.", {
+          promptTokens: 1050,
+          completionTokens: 20,
+          cachedTokens: 900,
+          reasoningTokens: 7,
+        })
+      )
+
+      try {
+        const model = await activeModelViaManager(testConfig({ endpoint: provider.url }))
+        const response = await model.generate({ messages: [{ role: "user", content: "hi" }] })
+
+        expect(response.usage).toEqual({
+          inputTokens: 1050,
+          outputTokens: 20,
+          totalTokens: 1070,
+          cacheReadTokens: 900,
+          reasoningTokens: 7,
+        })
+        // This protocol has no cache-write concept, so the field is absent
+        // rather than carried as zero.
+        expect(response.usage).not.toHaveProperty("cacheWriteTokens")
+      } finally {
+        await provider.close()
+      }
+    })
+  })
+
+  test("anthropic: cache read, cache write and reasoning survive normalization", async () => {
+    await withConfigDir(async () => {
+      const provider = await startMockProvider(() =>
+        anthropicDetailedUsageResponse("Hello.", {
+          inputTokens: 100, // the non-cached portion this API reports
+          outputTokens: 20,
+          cacheReadTokens: 900,
+          cacheWriteTokens: 50,
+          reasoningTokens: 7,
+        })
+      )
+
+      try {
+        const model = await activeModelViaManager(testConfig({
+          protocol: "anthropic",
+          model: "claude-sonnet-4-5",
+          endpoint: provider.url,
+        }))
+        const response = await model.generate({ messages: [{ role: "user", content: "hi" }] })
+
+        // The inclusive total folds in both cache components…
+        expect(response.usage).toEqual({
+          inputTokens: 1050,
+          outputTokens: 20,
+          totalTokens: 1070,
+          cacheReadTokens: 900,
+          cacheWriteTokens: 50,
+          reasoningTokens: 7,
+        })
+        // …and the detail decomposes it instead of adding to it.
+        const usage = response.usage!
+        expect(usage.cacheReadTokens! + usage.cacheWriteTokens!).toBeLessThanOrEqual(usage.inputTokens!)
+        expect(usage.reasoningTokens!).toBeLessThanOrEqual(usage.outputTokens!)
+      } finally {
+        await provider.close()
+      }
+    })
+  })
+
+  test("openai stream: cache read and reasoning survive the streaming boundary", async () => {
+    await withConfigDir(async () => {
+      const provider = await startMockProvider(() =>
+        sse([
+          openaiChunk({ content: "Hello." }, null),
+          openaiChunk({}, "stop"),
+          openaiDetailedUsageChunk({
+            promptTokens: 1050,
+            completionTokens: 20,
+            cachedTokens: 900,
+            reasoningTokens: 7,
+          }),
+          null,
+        ])
+      )
+
+      try {
+        const model = await activeModelViaManager(testConfig({ endpoint: provider.url }))
+        const events = await collect(model.stream({
+          messages: [{ role: "user", content: "hi" }],
+        }))
+
+        expect(events).toContainEqual({
+          type: "usage",
+          usage: {
+            inputTokens: 1050,
+            outputTokens: 20,
+            totalTokens: 1070,
+            cacheReadTokens: 900,
+            reasoningTokens: 7,
+          },
+        })
+      } finally {
+        await provider.close()
+      }
+    })
+  })
+
+  test("anthropic stream: a cache write survives (no openai equivalent)", async () => {
+    await withConfigDir(async () => {
+      const provider = await startMockProvider(() =>
+        sse(anthropicStreamEvents(["Hello."], "end_turn", { input: 100, output: 20 }, {
+          cacheReadTokens: 900,
+          cacheWriteTokens: 50,
+          reasoningTokens: 7,
+        }))
+      )
+
+      try {
+        const model = await activeModelViaManager(testConfig({
+          protocol: "anthropic",
+          model: "claude-sonnet-4-5",
+          endpoint: provider.url,
+        }))
+        const events = await collect(model.stream({ messages: [{ role: "user", content: "hi" }] }))
+
+        expect(events).toContainEqual({
+          type: "usage",
+          usage: {
+            inputTokens: 1050,
+            outputTokens: 20,
+            totalTokens: 1070,
+            cacheReadTokens: 900,
+            cacheWriteTokens: 50,
+            reasoningTokens: 7,
+          },
+        })
+      } finally {
+        await provider.close()
+      }
+    })
+  })
+
+  test("an unreported breakdown stays absent, never zero", async () => {
+    await withConfigDir(async () => {
+      // This fixture reports only the two totals. The SDK supplies 0 for the
+      // breakdown; "not reported" must stay distinguishable from "zero".
+      const provider = await startMockProvider(() => openaiTextResponse("Hello."))
+
+      try {
+        const model = await activeModelViaManager(testConfig({ endpoint: provider.url }))
+        const response = await model.generate({ messages: [{ role: "user", content: "hi" }] })
+
+        expect(response.usage).toEqual({
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        })
       } finally {
         await provider.close()
       }

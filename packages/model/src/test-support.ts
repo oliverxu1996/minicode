@@ -227,6 +227,56 @@ export function openaiUsageChunk(usage: { input: number; output: number }): unkn
   }
 }
 
+/** OpenAI usage fields carrying the cache/reasoning breakdown. */
+export interface OpenAIDetailedUsage {
+  /** Inclusive prompt total, as the API defines `prompt_tokens`. */
+  promptTokens: number
+  completionTokens: number
+  cachedTokens: number
+  reasoningTokens: number
+}
+
+function openaiDetailedUsageBody(usage: OpenAIDetailedUsage): unknown {
+  return {
+    prompt_tokens: usage.promptTokens,
+    completion_tokens: usage.completionTokens,
+    total_tokens: usage.promptTokens + usage.completionTokens,
+    prompt_tokens_details: { cached_tokens: usage.cachedTokens },
+    completion_tokens_details: { reasoning_tokens: usage.reasoningTokens },
+  }
+}
+
+/** An OpenAI response whose usage carries cache and reasoning detail, the way
+ *  a cache-enabled provider reports it. */
+export function openaiDetailedUsageResponse(text: string, usage: OpenAIDetailedUsage): Response {
+  return Response.json({
+    id: "chatcmpl-test",
+    object: "chat.completion",
+    created: 1,
+    model: "test-model",
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content: text },
+        finish_reason: "stop",
+      },
+    ],
+    usage: openaiDetailedUsageBody(usage),
+  })
+}
+
+/** A usage-only stream chunk carrying the same detail. */
+export function openaiDetailedUsageChunk(usage: OpenAIDetailedUsage): unknown {
+  return {
+    id: "chatcmpl-test",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "test-model",
+    choices: [],
+    usage: openaiDetailedUsageBody(usage),
+  }
+}
+
 // ---- Anthropic Messages fixtures -------------------------------------------
 
 export function anthropicTextResponse(text: string): Response {
@@ -239,6 +289,42 @@ export function anthropicTextResponse(text: string): Response {
     stop_reason: "end_turn",
     stop_sequence: null,
     usage: { input_tokens: 10, output_tokens: 5 },
+  })
+}
+
+/** Anthropic usage fields carrying the cache/reasoning breakdown. */
+export interface AnthropicDetailedUsage {
+  /** The NON-cached prompt portion: this API reports `input_tokens` excluding
+   *  cache reads and writes, which the adapter folds into the inclusive total. */
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  reasoningTokens: number
+}
+
+function anthropicDetailedUsageBody(usage: AnthropicDetailedUsage): unknown {
+  return {
+    input_tokens: usage.inputTokens,
+    output_tokens: usage.outputTokens,
+    cache_read_input_tokens: usage.cacheReadTokens,
+    cache_creation_input_tokens: usage.cacheWriteTokens,
+    output_tokens_details: { thinking_tokens: usage.reasoningTokens },
+  }
+}
+
+/** An Anthropic response whose usage carries cache and reasoning detail,
+ *  including a cache write, which the OpenAI-protocol API has no equivalent of. */
+export function anthropicDetailedUsageResponse(text: string, usage: AnthropicDetailedUsage): Response {
+  return Response.json({
+    id: "msg-test",
+    type: "message",
+    role: "assistant",
+    model: "test-model",
+    content: [{ type: "text", text }],
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage: anthropicDetailedUsageBody(usage),
   })
 }
 
@@ -266,6 +352,9 @@ export function anthropicStreamEvents(
   deltas: string[],
   stopReason: string,
   usage: { input: number; output: number },
+  /** Optional cache/reasoning breakdown, which this API reports across
+   *  `message_start` (cache) and `message_delta` (thinking). */
+  detail?: { cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number },
 ): unknown[] {
   return [
     {
@@ -276,7 +365,11 @@ export function anthropicStreamEvents(
         role: "assistant",
         model: "test-model",
         content: [],
-        usage: { input_tokens: usage.input },
+        usage: {
+          input_tokens: usage.input,
+          ...(detail?.cacheReadTokens === undefined ? {} : { cache_read_input_tokens: detail.cacheReadTokens }),
+          ...(detail?.cacheWriteTokens === undefined ? {} : { cache_creation_input_tokens: detail.cacheWriteTokens }),
+        },
       },
     },
     { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
@@ -289,7 +382,12 @@ export function anthropicStreamEvents(
     {
       type: "message_delta",
       delta: { stop_reason: stopReason },
-      usage: { output_tokens: usage.output },
+      usage: {
+        output_tokens: usage.output,
+        ...(detail?.reasoningTokens === undefined
+          ? {}
+          : { output_tokens_details: { thinking_tokens: detail.reasoningTokens } }),
+      },
     },
     { type: "message_stop" },
   ]

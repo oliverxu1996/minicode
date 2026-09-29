@@ -146,11 +146,30 @@ export type ModelFinishReason =
   | "error"
   | "unknown"
 
-/** Token usage reported by the provider, when it reports any. */
+/**
+ * Token usage reported by the provider, when it reports any.
+ *
+ * `inputTokens` and `outputTokens` are INCLUSIVE totals. The three detail
+ * fields below decompose them and must never be added to them:
+ *
+ *     inputTokens  ⊇ cacheReadTokens + cacheWriteTokens
+ *     outputTokens ⊇ reasoningTokens
+ *
+ * A field is absent when the provider did not report it — never zero-filled,
+ * so "not reported" stays distinguishable from "reported as zero".
+ */
 export interface ModelUsage {
+  /** Total prompt tokens, inclusive of cached tokens. */
   readonly inputTokens?: number
+  /** Total completion tokens, inclusive of reasoning tokens. */
   readonly outputTokens?: number
   readonly totalTokens?: number
+  /** Subset of `inputTokens`: prompt tokens served from cache. */
+  readonly cacheReadTokens?: number
+  /** Subset of `inputTokens`: prompt tokens written to cache. */
+  readonly cacheWriteTokens?: number
+  /** Subset of `outputTokens`: tokens spent on reasoning. */
+  readonly reasoningTokens?: number
 }
 
 /**

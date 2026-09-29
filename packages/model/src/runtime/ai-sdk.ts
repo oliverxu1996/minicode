@@ -504,10 +504,34 @@ function toUsage(usage: LanguageModelUsage | undefined): ModelUsage | undefined 
     inputTokens?: number
     outputTokens?: number
     totalTokens?: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
+    reasoningTokens?: number
   } = {}
   if (usage.inputTokens != null) normalized.inputTokens = usage.inputTokens
   if (usage.outputTokens != null) normalized.outputTokens = usage.outputTokens
   if (usage.totalTokens != null) normalized.totalTokens = usage.totalTokens
+  // The provider's own breakdown of the two totals above. Carried through and
+  // never folded into them: each is a subset of `inputTokens`/`outputTokens`,
+  // not an addition to it.
+  //
+  // Only a positive count is carried. The SDK reports `0` — not `undefined` —
+  // when a provider supplies no cache/reasoning breakdown, so a nullish check
+  // would turn "this provider does not report caching" into "this provider
+  // reported zero cached tokens". Requiring a positive value keeps unknown
+  // distinguishable from zero, which is the rule the totals above already
+  // follow.
+  const input = usage.inputTokenDetails
+  if (input?.cacheReadTokens != null && input.cacheReadTokens > 0) {
+    normalized.cacheReadTokens = input.cacheReadTokens
+  }
+  if (input?.cacheWriteTokens != null && input.cacheWriteTokens > 0) {
+    normalized.cacheWriteTokens = input.cacheWriteTokens
+  }
+  const output = usage.outputTokenDetails
+  if (output?.reasoningTokens != null && output.reasoningTokens > 0) {
+    normalized.reasoningTokens = output.reasoningTokens
+  }
   return Object.keys(normalized).length > 0 ? normalized : undefined
 }
 

@@ -208,6 +208,45 @@ describe("Crash recovery (V2, AC6/AC7)", () => {
   })
 })
 
+describe("Usage detail persistence (O1)", () => {
+  test("provider cache and reasoning detail survives to the snapshot and reload", async () => {
+    const { agent, reloadAsNewProcess, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+    await session.checkpoint()
+
+    // The provider-reported breakdown, as the model layer carries it.
+    session.appendAssistant(
+      [{ type: "text", text: "done" }],
+      {
+        usage: {
+          inputTokens: 1050,
+          outputTokens: 20,
+          totalTokens: 1070,
+          cacheReadTokens: 900,
+          cacheWriteTokens: 50,
+          reasoningTokens: 7,
+        },
+        finishReason: "stop",
+      },
+    )
+
+    // Through a fresh runtime root, as a restarted process would read it.
+    const persisted = await reloadAsNewProcess(session)
+    const assistant = persisted.messages.find(message => message.role === "assistant")
+    if (assistant?.role !== "assistant") throw new Error("expected an assistant message")
+
+    expect(assistant.usage).toEqual({
+      inputTokens: 1050,
+      outputTokens: 20,
+      totalTokens: 1070,
+      cacheReadTokens: 900,
+      cacheWriteTokens: 50,
+      reasoningTokens: 7,
+    })
+    cleanup()
+  })
+})
+
 describe("Model resolution (V2)", () => {
   test("MiniCode without a configured model reports the missing dependency", async () => {
     const { dir, cleanup } = tempDir()
