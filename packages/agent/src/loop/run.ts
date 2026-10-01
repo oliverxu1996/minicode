@@ -1,5 +1,6 @@
 import type { Model, ModelResponse, ModelUsage } from "@minicode/model"
 import { toolDurationMs } from "../session/ledger"
+import type { PruneStats } from "../session/prune"
 import type { Session } from "../session/session"
 import type {
   ModelIdentity,
@@ -67,10 +68,12 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
   // Counted from the run's own event stream rather than from loop internals,
   // so the record and what an external JSONL consumer reads cannot disagree:
   // `modelCalls` is the number of `model_response` events, `toolCalls` the
-  // number of `tool_result` events.
+  // number of `tool_result` events, and `usage` the sum of every event that
+  // reports it — normal responses and compaction calls alike.
   let modelCalls = 0
   let toolCalls = 0
   let usage: ModelUsage = {}
+  let pruning: PruneStats | undefined
 
   const emit = (event: RunEvent): void => {
     if (event.type === "model_response") {
@@ -78,8 +81,21 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
       usage = sumUsage(usage, event.usage)
     } else if (event.type === "tool_result") {
       toolCalls += 1
+    } else if (event.type === "compaction") {
+      // A compaction's summarization call never emits `model_response`, so its
+      // cost reaches the run total here and nowhere else — counted exactly once.
+      usage = sumUsage(usage, event.usage)
     }
     callerOnEvent?.(event)
+  }
+
+  // Pruning reports through a callback rather than an event, so the run totals
+  // are accumulated here and land on the record.
+  const recordPrune = (stats: PruneStats): void => {
+    pruning = {
+      reduced: (pruning?.reduced ?? 0) + stats.reduced,
+      originalBytes: (pruning?.originalBytes ?? 0) + stats.originalBytes,
+    }
   }
 
   // Persist 'running' BEFORE execution: a crash mid-run leaves 'running'
@@ -96,7 +112,7 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
       tools.set("skill", createSkillTool(deps.skills))
     }
     const loop = new AgentLoop(session, model, tools)
-    result = await loop.run(task, { ...deps, onEvent: emit })
+    result = await loop.run(task, { ...deps, onEvent: emit, onPrune: recordPrune })
   } catch (err) {
     // The loop is contractually non-throwing; this guards runtime bugs so a
     // session never stays stuck in 'running'.
@@ -118,6 +134,7 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
     usage,
     modelCalls,
     toolCalls,
+    ...(pruning === undefined ? {} : { pruning }),
     ...(result.error === undefined ? {} : { error: result.error }),
   }
   const index = session.runs.findIndex(run => run.id === runId)

@@ -5,6 +5,7 @@ import type {
   ModelToolResult,
   ModelUsage,
 } from "@minicode/model"
+import type { PruneStats } from "./prune"
 
 /**
  * One durable conversation entry.
@@ -105,6 +106,12 @@ export interface RunSummary {
   readonly usage?: ModelUsage
   readonly modelCalls?: number
   readonly toolCalls?: number
+  /**
+   * Totals across every request-pruning pass in this run: tool outputs
+   * withheld to fit the input budget, and their combined original size.
+   * Absent when the run never pruned anything.
+   */
+  readonly pruning?: PruneStats
   /** Present only when the run ended in an error. */
   readonly error?: string
 }
@@ -143,7 +150,13 @@ export type RunEvent =
        *  unknown rather than reading as an instant one. */
       durationMs?: number
     }
-  | { type: "compaction"; summarizedMessages: number }
+  | {
+      type: "compaction"
+      summarizedMessages: number
+      /** What the compaction's own model call consumed. Absent when no call
+       *  happened, or when the provider reported no usage. */
+      usage?: ModelUsage
+    }
   | {
       type: "auto_retry"
       attempt: number

@@ -4,7 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ModelMessage } from "@minicode/model"
 import { estimateTokens } from "./context-budget"
-import { pruneOldToolOutputs, isPrunedToolOutput, type ProjectionMessage } from "./session/prune"
+import {
+  pruneOldToolOutputs,
+  isPrunedToolOutput,
+  type ProjectionMessage,
+  type PruneStats,
+} from "./session/prune"
 import { Session } from "./session/session"
 import { truncateOutput } from "./tools/truncate"
 
@@ -447,5 +452,80 @@ describe("integration: Session projection vs durable state (I1/I8/I9)", () => {
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// O4 — pruning observability
+// ---------------------------------------------------------------------------
+
+describe("pruning reports what it withheld, without changing what it withholds", () => {
+  const observe = (
+    messages: readonly ProjectionMessage[],
+    inputBudget: number,
+  ): { observations: PruneStats[]; projected: ModelMessage[] } => {
+    const observations: PruneStats[] = []
+    const projected = pruneOldToolOutputs(messages, {
+      inputBudget,
+      onPrune: stats => observations.push(stats),
+    })
+    return { observations, projected }
+  }
+
+  test("a pass that reduces nothing reports nothing", () => {
+    const { observations } = observe(
+      [user("t1"), tool("a", "small"), user("t2"), tool("b", "more")],
+      100_000,
+    )
+    expect(observations).toEqual([])
+  })
+
+  test("an empty projection reports nothing", () => {
+    const { observations } = observe([], 1)
+    expect(observations).toEqual([])
+  })
+
+  test("each reduced result is counted once, with its own original size", () => {
+    const { observations, projected } = observe(
+      [user("t1"), tool("a", "a".repeat(2_000)), user("t2"), tool("b", "b".repeat(3_000))],
+      1,
+    )
+
+    expect(observations).toHaveLength(1)
+    expect(observations[0]).toEqual({ reduced: 2, originalBytes: 5_000 })
+    // The count agrees with the markers that actually reached the request.
+    expect(observations[0]!.reduced).toBe(markersIn(projected).length)
+  })
+
+  // The two-step shrink rewrites the same result twice: once keeping an
+  // excerpt, then again without it. That is ONE reduced result, and its
+  // original size is added once — not twice.
+  test("a result the two-stage shrink rewrites twice counts as one reduction", () => {
+    const messages = [user("t1"), tool("a", "x".repeat(4_000))]
+    const { observations, projected } = observe(messages, size(messages) - 5)
+
+    expect(markersIn(projected)).toHaveLength(1)
+    expect(observations).toEqual([{ reduced: 1, originalBytes: 4_000 }])
+  })
+
+  test("supplying a sink does not change the projection", () => {
+    const messages = [user("t1"), tool("a", overBudgetText), user("t2"), tool("b", "x")]
+    const without = pruneOldToolOutputs(messages, { inputBudget: 1 })
+
+    expect(observe(messages, 1).projected).toEqual(without)
+  })
+
+  test("a throwing sink is ignored and cannot change the projection", () => {
+    const messages = [user("t1"), tool("a", overBudgetText), user("t2"), tool("b", "x")]
+    const without = pruneOldToolOutputs(messages, { inputBudget: 1 })
+
+    const projected = pruneOldToolOutputs(messages, {
+      inputBudget: 1,
+      onPrune: () => {
+        throw new Error("sink failure")
+      },
+    })
+
+    expect(projected).toEqual(without)
   })
 })

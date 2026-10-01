@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ModelError } from "@minicode/model"
@@ -585,6 +585,114 @@ describe("Tool duration and per-run counts (O3)", () => {
     expect(result.finishReason).toBe("stop")
     // The new observability rides alongside without altering any of it.
     expect(typeof toolResult.durationMs).toBe("number")
+    cleanup()
+  })
+})
+
+describe("context-management observability (O4)", () => {
+  /** A task large enough that compaction finds a region to summarize. */
+  const longTask = `filler ${"filler ".repeat(4000)} and do the thing`
+
+  test("run usage counts a compaction's own model call exactly once", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse(
+        [{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }],
+        { usage: { inputTokens: 900, outputTokens: 20 } }, // over the proactive threshold
+      ),
+      textResponse("summary of the conversation", { usage: { inputTokens: 50, outputTokens: 10 } }),
+      textResponse("finished after compaction", { usage: { inputTokens: 200, outputTokens: 5 } }),
+    ], { contextWindow: 1000, maxOutputTokens: 250 }))
+    const session = agent.createSession(dir)
+
+    const result = await agent.run(session, longTask)
+
+    expect(result.finishReason).toBe("stop")
+    // 900 + 50 + 200 input, 20 + 10 + 5 output. Counting the compaction twice
+    // would give 1200/40; omitting it would give 1100/30.
+    expect(session.runs[0]!.usage).toEqual({ inputTokens: 1150, outputTokens: 35 })
+    cleanup()
+  })
+
+  test("provider-triggered compaction is observable and carries its usage", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }]),
+      { error: new ModelError("context_exceeded", "context_exceeded: request too large") },
+      textResponse("summary of the conversation", { usage: { inputTokens: 70, outputTokens: 8 } }),
+      textResponse("recovered after compaction retry"),
+    ], { contextWindow: 1000, maxOutputTokens: 250 }))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    const result = await agent.run(session, longTask, { onEvent: event => events.push(event) })
+
+    expect(result.finishReason).toBe("stop")
+    const compactions = events.filter(event => event.type === "compaction")
+    expect(compactions).toHaveLength(1)
+    expect(compactions[0]).toMatchObject({
+      summarizedMessages: expect.any(Number),
+      usage: { inputTokens: 70, outputTokens: 8 },
+    })
+    // The rejected request is neither a model call nor a source of usage.
+    expect(session.runs[0]!.usage).toEqual({ inputTokens: 70, outputTokens: 8 })
+    cleanup()
+  })
+
+  test("a compaction that cannot make progress emits no completed event", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse(
+        [{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }],
+        { usage: { inputTokens: 900 } },
+      ),
+      textResponse(""), // the summarization yields nothing → no progress
+    ], { contextWindow: 1000, maxOutputTokens: 250 }))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    const result = await agent.run(session, longTask, { onEvent: event => events.push(event) })
+
+    expect(result.finishReason).toBe("error")
+    expect(events.filter(event => event.type === "compaction")).toEqual([])
+    cleanup()
+  })
+
+  test("a run that withheld tool output records what it pruned", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse([{ toolCallId: "call_1", toolName: "read", input: { filePath: "big.txt" } }]),
+      textResponse("done"),
+    ], { contextWindow: 1000, maxOutputTokens: 250 }))
+    // A result far larger than the 750-token input budget, so the next request
+    // cannot fit and pruning has to reduce it.
+    writeFileSync(join(dir, "big.txt"), "a line of reasonably long text\n".repeat(600))
+    const session = agent.createSession(dir)
+
+    await agent.run(session, "read the file")
+
+    const pruning = session.runs[0]!.pruning
+    expect(pruning).toBeDefined()
+    expect(pruning!.reduced).toBeGreaterThan(0)
+    expect(pruning!.originalBytes).toBeGreaterThan(0)
+    cleanup()
+  })
+
+  test("compaction usage stays inside the run that incurred it", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse(
+        [{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }],
+        { usage: { inputTokens: 900, outputTokens: 20 } },
+      ),
+      textResponse("summary of the conversation", { usage: { inputTokens: 50, outputTokens: 10 } }),
+      textResponse("first done", { usage: { inputTokens: 200, outputTokens: 5 } }),
+      textResponse("second done", { usage: { inputTokens: 5, outputTokens: 1 } }),
+    ], { contextWindow: 1000, maxOutputTokens: 250 }))
+    const session = agent.createSession(dir)
+
+    await agent.run(session, longTask)
+    await agent.run(session, "a second, unrelated task")
+
+    expect(session.runs[0]!.usage).toEqual({ inputTokens: 1150, outputTokens: 35 })
+    // The second run starts from zero: it inherits none of the first run's
+    // compaction cost.
+    expect(session.runs[1]!.usage).toEqual({ inputTokens: 5, outputTokens: 1 })
     cleanup()
   })
 })

@@ -28,7 +28,13 @@ const ELISION_NOTICE = `Note: earlier messages were omitted before this point be
  * failure indistinguishable from a healthy no-op in the run's error report.
  */
 export type CompactionOutcome =
-  | { readonly status: "compacted"; readonly removed: number }
+  | {
+      readonly status: "compacted"
+      readonly removed: number
+      /** What the summarization call itself consumed, when the provider
+       *  reported it. Absent on paths where no model call happened. */
+      readonly usage?: ModelUsage
+    }
   | {
       readonly status: "no-progress"
       readonly reason: "no-compactable-region" | "empty-tail" | "empty-summary"
@@ -91,6 +97,7 @@ export class Compactor {
     ]
 
     let summary: string
+    let usage: ModelUsage | undefined
     try {
       const result = await this.model.generate({
         messages: summaryMessages,
@@ -100,6 +107,9 @@ export class Compactor {
         maxOutputTokens: this.budgets().outputBudget,
       })
       summary = result.content
+      // The call really happened, so its cost is a fact worth reporting. A
+      // provider that reported nothing leaves this absent rather than zero.
+      usage = result.usage
     } catch (err) {
       // A failed summarization leaves history untouched; report why rather
       // than pretending no progress was possible.
@@ -113,7 +123,11 @@ export class Compactor {
     }
     const tail = messages.slice(preserved)
     session.replaceMessages([summaryMessage, ...tail])
-    return { status: "compacted", removed: older.length }
+    return {
+      status: "compacted",
+      removed: older.length,
+      ...(usage === undefined ? {} : { usage }),
+    }
   }
 
   /**

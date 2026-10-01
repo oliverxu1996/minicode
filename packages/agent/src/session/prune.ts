@@ -16,6 +16,17 @@ export type PruneReason = "request-over-budget"
 /** A `ToolMessage` plus Agent-local metadata that never reaches the provider. */
 export type ProjectionMessage = ModelMessage & { readonly failureEvidence?: boolean }
 
+/** What one pruning pass actually removed. */
+export interface PruneStats {
+  /**
+   * Distinct tool outputs replaced by a pruned marker. A result the two-stage
+   * shrink rewrites more than once is still one reduction.
+   */
+  readonly reduced: number
+  /** Combined original UTF-8 byte length of exactly those results. */
+  readonly originalBytes: number
+}
+
 /** Inputs needed to decide whether — and how far — to reduce a request. */
 export interface PruneContext {
   /**
@@ -26,6 +37,14 @@ export interface PruneContext {
   readonly lastInputTokens?: number
   /** Tokens available for input, from `contextBudget()`. The hard boundary. */
   readonly inputBudget: number
+  /**
+   * Observability sink, called once for a pass that reduced something.
+   *
+   * Not called when nothing was reduced — absence means this pass withheld
+   * nothing, so a caller never has to filter out a zero-valued observation.
+   * A throwing sink is ignored: reporting must not change what pruning does.
+   */
+  readonly onPrune?: (stats: PruneStats) => void
 }
 
 /**
@@ -82,6 +101,7 @@ function markerFor(
   result: ModelToolResult,
   text: string,
   excerpt: string | undefined,
+  originalBytes: number,
 ): ModelToolResult {
   return {
     ...result,
@@ -91,7 +111,7 @@ function markerFor(
         [PRUNED_KEY]: true,
         reason: "request-over-budget",
         toolName: result.toolName,
-        originalBytes: Buffer.byteLength(text, "utf-8"),
+        originalBytes,
         ...recoveryHint(text),
         ...(excerpt === undefined ? {} : { excerpt }),
       },
@@ -165,6 +185,16 @@ export function pruneOldToolOutputs(
   const fits = (): boolean => estimateTokens(toModelMessages(projection)) <= context.inputBudget
   const lastUserIndex = lastUserIndexOf(projection)
 
+  // Observability accounting. A result the two-stage shrink rewrites more than
+  // once is ONE reduction, so each distinct result is recorded on its first
+  // replacement and its original size added exactly once.
+  let reduced = 0
+  let originalBytes = 0
+  const recordReduction = (bytes: number): void => {
+    reduced += 1
+    originalBytes += bytes
+  }
+
   // Stage 1 — withhold the oldest reducible results. Everything in the current
   // user turn is protected, as are failure-evidence turns and tool errors.
   for (let i = 0; i < projection.length && !fits(); i++) {
@@ -180,12 +210,15 @@ export function pruneOldToolOutputs(
       const current = projection[i].content as readonly ModelToolResult[]
       const result = current[r]
       if (!isReducible(projection[i], result)) continue
+      const text = textOf(result)
+      const bytes = Buffer.byteLength(text, "utf-8")
       projection[i] = {
         ...projection[i],
         content: current.map((candidate, ri) =>
-          ri === r ? markerFor(result, textOf(result), undefined) : candidate,
+          ri === r ? markerFor(result, text, undefined, bytes) : candidate,
         ),
       } as ProjectionMessage
+      recordReduction(bytes)
     }
   }
 
@@ -201,15 +234,24 @@ export function pruneOldToolOutputs(
         const result = content[r]
         if (!isReducible(message, result)) continue
         const text = textOf(result)
+        const bytes = Buffer.byteLength(text, "utf-8")
         // Derive the reduction from the estimator and the budget — never from
         // an arbitrary byte constant.
         const excessChars = Math.max(0, (estimateTokens(toModelMessages(projection)) - context.inputBudget) * 4)
         const keepChars = Math.max(0, text.length - excessChars)
+        // This result may be rewritten twice below. It is still ONE reduced
+        // result, so it is recorded on the first replacement only.
+        let recorded = false
         const shrink = (excerpt: string | undefined): void => {
           projection[i] = {
             ...projection[i],
-            content: content.map((candidate, ri) => (ri === r ? markerFor(result, text, excerpt) : candidate)),
+            content: content.map((candidate, ri) =>
+              ri === r ? markerFor(result, text, excerpt, bytes) : candidate),
           } as ProjectionMessage
+          if (!recorded) {
+            recorded = true
+            recordReduction(bytes)
+          }
         }
         shrink(keepChars > 0 ? text.slice(0, keepChars) : undefined)
         // The marker's own metadata costs tokens; drop the excerpt if that is
@@ -218,6 +260,15 @@ export function pruneOldToolOutputs(
         break
       }
       break
+    }
+  }
+
+  if (reduced > 0 && context.onPrune !== undefined) {
+    try {
+      context.onPrune({ reduced, originalBytes })
+    } catch {
+      // Best-effort reporting: a failing sink must not discard the projection
+      // this pass already computed, nor change what the model receives.
     }
   }
 

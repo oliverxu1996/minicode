@@ -9,6 +9,7 @@ import type {
 import { ModelError } from "@minicode/model"
 import type { Skill } from "../config/resources"
 import { contextBudget } from "../context-budget"
+import type { PruneStats } from "../session/prune"
 import type { Session } from "../session/session"
 import type { RunEvent } from "../session/types"
 import { toModelTools, type Tool } from "../tools"
@@ -29,6 +30,8 @@ export interface LoopOptions {
   /** Proactive compaction settings (from runtime settings). */
   autoCompact?: { enabled: boolean; thresholdPct: number }
   onEvent?: (event: RunEvent) => void
+  /** Observability sink forwarded to request pruning. */
+  onPrune?: (stats: PruneStats) => void
 }
 
 const DEFAULT_MAX_ITERATIONS = 100
@@ -39,6 +42,16 @@ const MAX_COMPACTION_RETRIES = 5
 /** Delayed retries of a rate-limited model call (auto-retry). */
 const MAX_AUTO_RETRIES = 3
 const AUTO_RETRY_DELAY_MS = 2000
+
+/** The `compaction` event for a compaction that actually completed. Built in
+ *  one place so every trigger describes it identically. */
+function compactionEvent(outcome: { removed: number; usage?: ModelUsage }): RunEvent {
+  return {
+    type: "compaction",
+    summarizedMessages: outcome.removed,
+    ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
+  }
+}
 
 /** Resolves after `ms`, or early with `true` when the signal aborts. */
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<boolean> {
@@ -145,7 +158,7 @@ export class AgentLoop {
           // Proactive compaction is best-effort: a failure here is not fatal,
           // because the reactive and provider paths still guard the request.
           if (outcome.status === "compacted") {
-            emit({ type: "compaction", summarizedMessages: outcome.removed })
+            emit(compactionEvent(outcome))
           }
         }
       }
@@ -168,6 +181,9 @@ export class AgentLoop {
           messages: this.session.toRequestMessages({
             lastInputTokens,
             inputBudget: budget.inputBudget,
+            // Forwarded only when a sink exists, so a run without one builds
+            // exactly the context it built before.
+            ...(opts.onPrune === undefined ? {} : { onPrune: opts.onPrune }),
           }),
           tools: toModelTools(this.tools),
           // Per-request output ceiling from the locked 75/25 budget.
@@ -221,6 +237,9 @@ export class AgentLoop {
             const outcome = await compactor.compact(this.session)
             await this.session.checkpoint()
             if (outcome.status === "compacted") {
+              // The rejected request is not a model call and its usage was
+              // never reported; only the compaction that followed is recorded.
+              emit(compactionEvent(outcome))
               iterations -= 1 // the retried attempt replaces this one
               continue
             }
@@ -339,7 +358,7 @@ export class AgentLoop {
         const outcome = await compactor.compact(this.session)
         await this.session.checkpoint()
         if (outcome.status === "compacted") {
-          emit({ type: "compaction", summarizedMessages: outcome.removed })
+          emit(compactionEvent(outcome))
         } else {
           return {
             aborted: false,
