@@ -12,13 +12,25 @@ import {
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import type { ModelLimits } from "@minicode/model"
 import type { Session } from "../session/session"
 import type { RunEvent, SessionMessage } from "../session/types"
 import type { MiniCode } from "../minicode"
 import type { PromptTemplate, Skill } from "../config/resources"
 import { loadResources } from "../config/resources"
+import { loadSettings } from "../config/settings"
 import { isProjectTrusted } from "../config/trust"
 import { ansi, markdownTheme } from "./theme"
+import {
+	NO_RUN_DISPLAY,
+	compactionNoticeText,
+	footerSegments,
+	reduceRunDisplay,
+	runEndNotice,
+	runSummaryLines,
+	type FooterSegment,
+	type RunDisplay,
+} from "./projection"
 import { Selector, type SelectorItem } from "./selector"
 import { MiniCodeAutocomplete } from "./autocomplete"
 import { expandFileReferences } from "./expand"
@@ -33,6 +45,18 @@ import {
 } from "./components"
 
 const IGNORED = new Set([".git", "node_modules", ".tool-output", ".minicode"])
+
+/** Applies a footer segment's tone. The projection decides meaning, not color. */
+function toneFor(segment: FooterSegment): string {
+	switch (segment.tone) {
+		case "warn":
+			return ansi.yellow(segment.text)
+		case "ok":
+			return ansi.green(segment.text)
+		case "dim":
+			return ansi.gray(segment.text)
+	}
+}
 
 export interface MiniCodeTuiOptions {
 	agent: MiniCode
@@ -66,12 +90,13 @@ export class MiniCodeTui {
 	private readonly loader: Loader
 	private session: Session
 	private running = false
-	private iteration = 0
-	private lastUsage: { input?: number; output?: number } | undefined
+	/** Runtime facts the footer reads, folded from the run's own events. */
+	private display: RunDisplay = NO_RUN_DISPLAY
 	private abort: AbortController | null = null
 	private lastCtrlC = 0
 	private toolsExpanded = false
-	private modelContextWindow: number | undefined
+	private modelLimits: ModelLimits | undefined
+	private compactThresholdPct: number | undefined
 	private gitBranch: string | undefined
 	private readonly followUps: string[] = []
 	private readonly pendingTools = new Map<string, ToolExecutionComponent>()
@@ -414,8 +439,11 @@ export class MiniCodeTui {
 
 	private async startRun(text: string): Promise<void> {
 		this.running = true
-		this.iteration = 0
+		this.display = NO_RUN_DISPLAY
 		this.abort = new AbortController()
+		// The model is resolved per run, so the footer's budget is refreshed
+		// here: a switch made by /model or Ctrl-P must not leave it stale.
+		await this.refreshFooterData()
 		this.showSpinner("working… (esc to interrupt)")
 
 		let aborted = false
@@ -461,12 +489,13 @@ export class MiniCodeTui {
 	// ── RunEvent → UI (the single event adapter) ─────────────────────
 
 	private handleRunEvent(event: RunEvent): void {
+		// The display facts are folded from the runtime's own events, once.
+		this.display = reduceRunDisplay(this.display, event)
 		switch (event.type) {
 			case "run_start":
 				break
 			case "iteration_start":
-				this.iteration = event.iteration
-				this.loader.setMessage(`iteration ${event.iteration}… (esc to interrupt)`)
+				this.loader.setMessage(`step ${event.iteration}… (esc to interrupt)`)
 				this.updateFooter()
 				break
 			case "assistant_delta": {
@@ -493,9 +522,6 @@ export class MiniCodeTui {
 				this.chat.addChild(notice("steered"))
 				break
 			case "model_response": {
-				if (event.usage !== undefined) {
-					this.lastUsage = { input: event.usage.inputTokens, output: event.usage.outputTokens }
-				}
 				const last = this.session.lastAssistant()
 				const text = last !== undefined
 					? last.content.filter(part => part.type === "text").map(part => part.text).join("")
@@ -526,14 +552,15 @@ export class MiniCodeTui {
 			case "tool_result": {
 				const component = this.pendingTools.get(event.toolCallId)
 				if (component !== undefined) {
-					component.setResult(event.ok, event.result)
+					// Duration is the runtime's; the TUI never times a tool itself.
+					component.setResult(event.ok, event.result, event.durationMs)
 					component.setExpanded(this.toolsExpanded)
 					this.pendingTools.delete(event.toolCallId)
 				}
 				break
 			}
 			case "compaction":
-				this.chat.addChild(notice(`context compacted — ${event.summarizedMessages} messages summarized`))
+				this.chat.addChild(notice(compactionNoticeText(event.summarizedMessages, event.usage)))
 				break
 			case "auto_retry":
 				this.loader.setMessage(
@@ -544,15 +571,17 @@ export class MiniCodeTui {
 				this.chat.addChild(notice(event.note.split("\n")[0] ?? "recovered from interruption"))
 				break
 			case "run_end": {
-				if (event.error !== undefined) {
-					this.chat.addChild(errorNotice(event.error))
-				} else if (event.finishReason !== "stop" && event.finishReason !== "aborted") {
-					this.chat.addChild(notice(`run ended without a final answer (${event.finishReason})`))
+				const terminal = runEndNotice(event.finishReason, event.error)
+				if (terminal?.kind === "error") this.chat.addChild(errorNotice(terminal.text))
+				else if (terminal?.kind === "warn") this.chat.addChild(notice(terminal.text))
+
+				// The runtime's own record, rendered as sent — no value here is
+				// recomputed. The step counter is deliberately left as it is:
+				// the summary reports the authoritative model-call count, and
+				// the display resets when the next run starts.
+				for (const line of runSummaryLines(event.run)) {
+					this.chat.addChild(notice(line))
 				}
-				if (event.usage?.inputTokens !== undefined || event.usage?.outputTokens !== undefined) {
-					this.lastUsage = { input: event.usage.inputTokens, output: event.usage.outputTokens }
-				}
-				this.iteration = 0
 				break
 			}
 		}
@@ -586,29 +615,31 @@ export class MiniCodeTui {
 	}
 
 	private updateFooter(): void {
-		const cwdShort = this.session.cwd.replace(/^\/home\/[^/]+/, "~").replace(/\/+$/, "") || "/"
-		const branch = this.gitBranch !== undefined ? ` (${this.gitBranch})` : ""
-		const parts = [ansi.gray(`${cwdShort}${branch}`)]
-		if (this.lastUsage?.input !== undefined) {
-			parts.push(ansi.gray(`↑${this.lastUsage.input} ↓${this.lastUsage.output ?? 0}`))
-		}
-		if (this.lastUsage?.input !== undefined && this.modelContextWindow !== undefined) {
-			const percent = ((this.lastUsage.input / this.modelContextWindow) * 100).toFixed(1)
-			parts.push(ansi.gray(`ctx ${percent}%`))
-		}
-		parts.push(
-			this.running
-				? ansi.yellow(`working (iteration ${this.iteration}) — esc to interrupt`)
-				: ansi.green("idle"),
-		)
-		this.footer.setText(parts.join(ansi.gray("  ·  ")))
+		const segments = footerSegments({
+			cwd: this.session.cwd,
+			branch: this.gitBranch,
+			lastCallUsage: this.display.lastCallUsage,
+			runUsage: this.display.runUsage,
+			limits: this.modelLimits,
+			compactThresholdPct: this.compactThresholdPct,
+			running: this.running,
+			step: this.display.step,
+		})
+		this.footer.setText(segments.map(toneFor).join(ansi.gray("  ·  ")))
 		this.tui.requestRender()
 	}
 
 	private async refreshFooterData(): Promise<void> {
+		// Re-read per run and on every model switch: the footer must describe
+		// the model actually in use, never a previous one.
 		const model = await this.options.agent.currentModel()
-		if (model !== undefined) {
-			this.modelContextWindow = model.limits.contextWindow
+		this.modelLimits = model?.limits
+		try {
+			this.compactThresholdPct = loadSettings(this.session.cwd).settings.autoCompact?.thresholdPct
+		} catch {
+			// A malformed settings file must not break the footer. Without a
+			// threshold the context segment omits it rather than guessing one.
+			this.compactThresholdPct = undefined
 		}
 		try {
 			const proc = Bun.spawnSync(["git", "-C", this.session.cwd, "rev-parse", "--abbrev-ref", "HEAD"])

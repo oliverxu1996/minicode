@@ -1,6 +1,7 @@
 import { Box, Container, Markdown, Spacer, Text, type Component } from "@minicode/tui"
 import type { SessionMessage } from "../session/types"
 import { ansi, markdownTheme } from "./theme"
+import { formatDuration } from "./projection"
 
 /**
  * MiniCode chat components for the runtime's message model.
@@ -78,6 +79,7 @@ export class ToolExecutionComponent implements Component {
 	private input: Record<string, unknown>
 	private fullLines: string[] = []
 	private expanded = false
+	private durationMs: number | undefined
 
 	constructor(
 		readonly toolCallId: string,
@@ -108,9 +110,14 @@ export class ToolExecutionComponent implements Component {
 
 	private progressPreview: string[] = []
 
-	/** Records the outcome; replaces the running line with the final one. */
-	setResult(ok: boolean, result: string): void {
+	/** Records the outcome; replaces the running line with the final one.
+	 *
+	 *  `durationMs` is the runtime's own figure, passed through untouched —
+	 *  the UI never times a tool itself, and an unreported duration stays
+	 *  absent rather than rendering as an instant zero. */
+	setResult(ok: boolean, result: string, durationMs?: number): void {
 		this.state = ok ? "success" : "error"
+		this.durationMs = durationMs
 
 		const plain = result.replace(/\x1b\[[0-9;]*m/g, "")
 		this.fullLines = plain
@@ -130,13 +137,14 @@ export class ToolExecutionComponent implements Component {
 	private headerLine(): string {
 		const args = toolArgumentSummary(this.name, this.input)
 		const suffix = args.length > 0 ? ` ${ansi.gray(args)}` : ""
+		const took = this.durationMs === undefined ? "" : ` ${ansi.gray(`· ${formatDuration(this.durationMs)}`)}`
 		switch (this.state) {
 			case "running":
 				return `  ${ansi.cyan("▸")} ${ansi.bold(this.name)}${suffix}`
 			case "success":
-				return `  ${ansi.green("✓")} ${ansi.bold(this.name)}${suffix}`
+				return `  ${ansi.green("✓")} ${ansi.bold(this.name)}${suffix}${took}`
 			case "error":
-				return `  ${ansi.red("✗")} ${ansi.bold(this.name)}${suffix}`
+				return `  ${ansi.red("✗")} ${ansi.bold(this.name)}${suffix}${took}`
 		}
 	}
 

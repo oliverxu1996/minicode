@@ -1,6 +1,8 @@
 import { MiniCode } from "../minicode"
+import type { RunSummary } from "../session/types"
 import { MINICODE_VERSION } from "../version"
 import { MiniCodeTui } from "./app"
+import { resultLine } from "./projection"
 
 /**
  * MiniCode entry point.
@@ -137,8 +139,12 @@ export async function runCli(argv: string[], io: CliIO): Promise<number | null> 
     const { session } = await resolveSession(agent, args)
     const active = session ?? agent.createSession(args.cwd)
 
+    // The run's own record, taken from the stream rather than rebuilt, so the
+    // final line carries the same summary the session persists.
+    let run: RunSummary | undefined
     const result = await agent.run(active, args.print, {
       onEvent: event => {
+        if (event.type === "run_end") run = event.run
         if (args.jsonMode) {
           io.stdout(JSON.stringify(event) + "\n")
         }
@@ -146,7 +152,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number | null> 
     })
 
     if (args.jsonMode) {
-      io.stdout(JSON.stringify({ type: "result", finishReason: result.finishReason, iterations: result.iterations, error: result.error ?? null }) + "\n")
+      io.stdout(JSON.stringify(resultLine(result.finishReason, result.iterations, result.error, run)) + "\n")
     } else {
       const last = active.lastAssistant()
       const text = last !== undefined
