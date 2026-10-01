@@ -26,7 +26,6 @@ import {
 	compactionNoticeText,
 	footerSegments,
 	reduceRunDisplay,
-	runEndNotice,
 	runSummaryLines,
 	type FooterSegment,
 	type RunDisplay,
@@ -571,14 +570,14 @@ export class MiniCodeTui {
 				this.chat.addChild(notice(event.note.split("\n")[0] ?? "recovered from interruption"))
 				break
 			case "run_end": {
-				const terminal = runEndNotice(event.finishReason, event.error)
-				if (terminal?.kind === "error") this.chat.addChild(errorNotice(terminal.text))
-				else if (terminal?.kind === "warn") this.chat.addChild(notice(terminal.text))
+				// The failure that ended the run, in full, before the summary.
+				if (event.run.error !== undefined) this.chat.addChild(errorNotice(event.run.error))
 
 				// The runtime's own record, rendered as sent — no value here is
-				// recomputed. The step counter is deliberately left as it is:
-				// the summary reports the authoritative model-call count, and
-				// the display resets when the next run starts.
+				// recomputed, and the record itself states how the run ended. The
+				// step counter is deliberately left as it is: the summary reports
+				// the authoritative model-call count, and the display resets when
+				// the next run starts.
 				for (const line of runSummaryLines(event.run)) {
 					this.chat.addChild(notice(line))
 				}

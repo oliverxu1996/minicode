@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ModelLimits } from "@minicode/model"
 import { contextBudget } from "./context-budget"
-import type { ModelIdentity, RunEvent, RunSummary } from "./session/types"
+import type { ModelIdentity, RunEvent, RunFinishReason, RunSummary } from "./session/types"
 import {
   NO_RUN_DISPLAY,
   compactionNoticeText,
@@ -9,7 +9,7 @@ import {
   footerSegments,
   reduceRunDisplay,
   resultLine,
-  runEndNotice,
+  runStateLine,
   runSummaryLines,
   type FooterInput,
 } from "./tui/projection"
@@ -189,8 +189,20 @@ describe("the run summary renders the record as given", () => {
   test("counts and tokens are the record's own values", () => {
     const lines = runSummaryLines(record)
     expect(lines).toContain("3 model calls · 2 tool calls")
-    expect(lines).toContain("tokens ↑2300 ↓95")
-    expect(lines).toContain("finish stop")
+    expect(lines).toContain("↑2300 input · ↓95 output")
+  })
+
+  test("the run's totals are labelled apart from the last call's", () => {
+    const lines = runSummaryLines(record).join(" ")
+    // The footer's bare `↑in ↓out` is the last call; these are the run's.
+    expect(lines).toContain("input")
+    expect(lines).toContain("output")
+  })
+
+  test("a token count the provider omitted is left out, not zeroed", () => {
+    const lines = runSummaryLines({ ...record, usage: { outputTokens: 95 } })
+    expect(lines.join(" ")).toContain("↓95 output")
+    expect(lines.join(" ")).not.toContain("input")
   })
 
   test("an unfinished record renders only what it actually holds", () => {
@@ -200,7 +212,7 @@ describe("the run summary renders the record as given", () => {
 
   test("a partially reported record shows the parts it has", () => {
     const lines = runSummaryLines({ id: "r1", startedAt: 1, model: MODEL, modelCalls: 1 })
-    expect(lines).toEqual(["1 model calls"])
+    expect(lines).toEqual(["1 model call"])
   })
 })
 
@@ -308,33 +320,61 @@ describe("the final JSON line carries the run record", () => {
 // ---------------------------------------------------------------------------
 
 describe("terminal states stay distinguishable without claiming success", () => {
-  test("a normal stop and a user abort are not flagged", () => {
-    expect(runEndNotice("stop", undefined)).toBeUndefined()
-    expect(runEndNotice("aborted", undefined)).toBeUndefined()
+  const state = (finishReason: RunFinishReason, finishedAt?: number): RunSummary => ({
+    id: "r1", startedAt: 1, model: MODEL, finishReason,
+    ...(finishedAt === undefined ? {} : { finishedAt }),
   })
 
-  test("every other reason is surfaced", () => {
+  test("a normal stop reads as a finished run, never as a solved task", () => {
+    const line = runStateLine(state("stop", 12_400))
+    expect(line).toBe("● finished · 12.4s")
+    // Neither the words nor a tick: both would claim the task, not the run.
+    expect(line).not.toMatch(/success|succeed|solved|completed|done|✓|✔/i)
+  })
+
+  test("a user interrupt is distinguishable from a completion", () => {
+    expect(runStateLine(state("aborted", 2_000))).toBe("■ interrupted · 2.0s")
+  })
+
+  test("an errored run is distinguishable from both", () => {
+    expect(runStateLine(state("error", 501))).toBe("▲ ended in error · 500ms")
+  })
+
+  test("every reason without a final answer is named", () => {
     for (const reason of ["max-iterations", "doom-loop", "length", "unknown"] as const) {
-      expect(runEndNotice(reason, undefined)).toEqual({
-        kind: "warn",
-        text: `run ended without a final answer (${reason})`,
-      })
+      expect(runStateLine(state(reason))).toBe(`▲ ended without a final answer (${reason})`)
     }
   })
 
-  test("an error outranks the finish reason", () => {
-    expect(runEndNotice("error", "boom")).toEqual({ kind: "error", text: "boom" })
+  test("a run whose end was not recorded reports no duration", () => {
+    // startedAt without finishedAt: nothing to subtract, so nothing is shown.
+    expect(runStateLine(state("stop"))).toBe("● finished")
   })
 
-  test("no notice ever claims the task succeeded", () => {
-    const notices = [
-      runEndNotice("stop", undefined),
-      runEndNotice("max-iterations", undefined),
-      runEndNotice("error", "boom"),
-    ]
-    for (const notice of notices) {
-      if (notice !== undefined) expect(notice.text).not.toMatch(/success|succeed|solved|completed/i)
+  test("a run that has not ended states nothing at all", () => {
+    expect(runStateLine({ id: "r1", startedAt: 1, model: MODEL })).toBeUndefined()
+    expect(runSummaryLines({ id: "r1", startedAt: 1, model: MODEL })).toEqual([])
+  })
+
+  test("the summary leads with the state and the elapsed time", () => {
+    expect(runSummaryLines(state("stop", 12_400))[0]).toBe("● finished · 12.4s")
+  })
+
+  test("no terminal state renders a tick", () => {
+    for (const reason of ["stop", "aborted", "error", "max-iterations", "doom-loop", "length", "unknown"] as const) {
+      expect(runStateLine(state(reason, 2))).not.toMatch(/✓|✔/)
     }
+  })
+
+  test("a count of one reads in the singular", () => {
+    const lines = runSummaryLines({ id: "r1", startedAt: 1, model: MODEL, modelCalls: 1, toolCalls: 1 })
+    expect(lines).toEqual(["1 model call · 1 tool call"])
+  })
+
+  test("a finish time before the start reports no duration", () => {
+    // Only a clock step can produce this; it is not a run fact.
+    expect(runStateLine({ id: "r1", startedAt: 5_000, finishedAt: 1_000, model: MODEL, finishReason: "stop" }))
+      .toBe("● finished")
   })
 })
 

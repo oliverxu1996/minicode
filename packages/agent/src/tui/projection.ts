@@ -173,40 +173,71 @@ export function compactionNoticeText(
   return cost === undefined ? base : `${base} · ${cost}`
 }
 
-/** What a finished run should say, if anything, beyond its summary. */
-export type RunEndNotice =
-  | { readonly kind: "error"; readonly text: string }
-  | { readonly kind: "warn"; readonly text: string }
-
-/**
- * The notice a run's terminal state warrants.
- *
- * A reason of `stop` is the model's own final answer, and `aborted` is a user
- * interruption — both are expected, so neither is flagged. Everything else is
- * surfaced so the run does not look like it simply stopped. This is a fact
- * about how the loop ended, never a claim about the coding task.
- */
-export function runEndNotice(
-  finishReason: RunFinishReason,
-  error: string | undefined,
-): RunEndNotice | undefined {
-  if (error !== undefined) return { kind: "error", text: error }
-  if (finishReason === "stop" || finishReason === "aborted") return undefined
-  return { kind: "warn", text: `run ended without a final answer (${finishReason})` }
+/** `1 model call`, `2 model calls` — a count read as prose. */
+function count(n: number, singular: string): string {
+  return `${n} ${singular}${n === 1 ? "" : "s"}`
 }
 
-/** A compact, plain-text summary of a finished run, read from the record. */
+/**
+ * How a run ended, in words rather than a runtime enum value.
+ *
+ * The markers say only which kind of ending this was. None of them is a tick:
+ * a run that stops has produced a final answer, which is not the same as the
+ * coding task having succeeded, and this line must not imply the latter.
+ */
+function runStateText(finishReason: RunFinishReason): string {
+  switch (finishReason) {
+    case "stop":
+      return "● finished"
+    case "aborted":
+      return "■ interrupted"
+    case "error":
+      return "▲ ended in error"
+    default:
+      return `▲ ended without a final answer (${finishReason})`
+  }
+}
+
+/** Wall-clock time the run spanned, when the runtime recorded both ends. */
+function elapsedMs(run: RunSummary): number | undefined {
+  if (run.startedAt === undefined || run.finishedAt === undefined) return undefined
+  const span = run.finishedAt - run.startedAt
+  // A negative span can only come from the clock moving, not from the run.
+  return span < 0 ? undefined : span
+}
+
+/**
+ * How the run ended and how long it took, or undefined while it has not ended.
+ *
+ * A statement about the *run*, never about whether the coding work succeeded:
+ * `stop` means the model produced a final answer, nothing more. A run whose
+ * end is not known reports no duration rather than a fabricated one.
+ */
+export function runStateLine(run: RunSummary): string | undefined {
+  if (run.finishReason === undefined) return undefined
+  const elapsed = elapsedMs(run)
+  const took = elapsed === undefined ? "" : ` · ${formatDuration(elapsed)}`
+  return `${runStateText(run.finishReason)}${took}`
+}
+
+/** A compact summary of a finished run, read from the record as given. */
 export function runSummaryLines(run: RunSummary): string[] {
   const lines: string[] = []
 
+  const state = runStateLine(run)
+  if (state !== undefined) lines.push(state)
+
   const counts: string[] = []
-  if (run.modelCalls !== undefined) counts.push(`${run.modelCalls} model calls`)
-  if (run.toolCalls !== undefined) counts.push(`${run.toolCalls} tool calls`)
+  if (run.modelCalls !== undefined) counts.push(count(run.modelCalls, "model call"))
+  if (run.toolCalls !== undefined) counts.push(count(run.toolCalls, "tool call"))
   if (counts.length > 0) lines.push(counts.join(" · "))
 
   if (run.usage !== undefined) {
-    const tokens = tokenPair(run.usage)
-    if (tokens !== undefined) lines.push(`tokens ${tokens}`)
+    // Labelled as run totals, so they cannot be read as the last call's.
+    const tokens: string[] = []
+    if (run.usage.inputTokens !== undefined) tokens.push(`↑${run.usage.inputTokens} input`)
+    if (run.usage.outputTokens !== undefined) tokens.push(`↓${run.usage.outputTokens} output`)
+    if (tokens.length > 0) lines.push(tokens.join(" · "))
   }
 
   // Only when something was actually withheld: absence of the indicator is
@@ -216,7 +247,6 @@ export function runSummaryLines(run: RunSummary): string[] {
     lines.push(`pruned ${run.pruning.reduced} tool ${results} (${formatBytes(run.pruning.originalBytes)})`)
   }
 
-  if (run.finishReason !== undefined) lines.push(`finish ${run.finishReason}`)
   return lines
 }
 
