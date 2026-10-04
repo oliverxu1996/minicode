@@ -124,10 +124,10 @@ export class AgentLoop {
 
     const budget = contextBudget(this.model.limits)
     const compactor = new Compactor(this.model, this.model.limits.contextWindow)
-    const system = buildSystemPrompt(this.session, {
-      projectInstructions: opts.projectInstructions ?? null,
-      skills: opts.skills ?? [],
-    })
+    // Built on first use rather than eagerly: constructing the prompt consumes
+    // the session's pending recovery note, so it must happen only once a model
+    // request is actually about to be sent — the run can still abort first.
+    let systemPrompt: string | null = null
 
     let iterations = 0
     let inputTokens = 0
@@ -177,14 +177,27 @@ export class AgentLoop {
       let finishReason: ModelFinishReason = "unknown"
       let steered: string | null = null
       try {
+        if (systemPrompt === null) {
+          systemPrompt = buildSystemPrompt(this.session, {
+            projectInstructions: opts.projectInstructions ?? null,
+            skills: opts.skills ?? [],
+          })
+        }
         const stream = this.model.stream({
-          messages: this.session.toRequestMessages({
-            lastInputTokens,
-            inputBudget: budget.inputBudget,
-            // Forwarded only when a sink exists, so a run without one builds
-            // exactly the context it built before.
-            ...(opts.onPrune === undefined ? {} : { onPrune: opts.onPrune }),
-          }),
+          // System-level instructions lead the conversation. The provider
+          // adapter turns this into each protocol's native mechanism (a
+          // top-level `system` parameter on Anthropic, a leading system
+          // message on OpenAI). The session's durable history never holds it.
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...this.session.toRequestMessages({
+              lastInputTokens,
+              inputBudget: budget.inputBudget,
+              // Forwarded only when a sink exists, so a run without one builds
+              // exactly the context it built before.
+              ...(opts.onPrune === undefined ? {} : { onPrune: opts.onPrune }),
+            }),
+          ],
           tools: toModelTools(this.tools),
           // Per-request output ceiling from the locked 75/25 budget.
           maxOutputTokens: budget.outputBudget,
