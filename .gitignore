@@ -33,8 +33,11 @@ tmp/
 # deliberately tracked, so docs/engineering/ is re-included here. The pattern
 # ignores the contents rather than the directory itself, because git cannot
 # re-include a path whose parent directory is excluded.
+# docs/investigations/ holds the structural investigation reports the
+# cleanup work items are specified from, so it is tracked for the same reason.
 /docs/*
 !/docs/engineering/
+!/docs/investigations/
 
 # Editor and OS noise
 .DS_Store
