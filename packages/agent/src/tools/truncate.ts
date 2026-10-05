@@ -38,9 +38,13 @@ export function truncateOutput(result: ToolResult, cwd: string, toolName?: strin
 
   const preview = result.data.slice(0, PREVIEW_LENGTH)
   const truncated = result.data.length - PREVIEW_LENGTH
+  const spillPath = join(dir, slug)
   return {
     ...result,
     ok: true,
-    data: `${preview}\n\n...${truncated} bytes truncated. Full content saved to: ${join(dir, slug)}\nUse read with offset/limit to view specific sections.`,
+    data: `${preview}\n\n...${truncated} bytes truncated. Full content saved to: ${spillPath}\nUse read with offset/limit to view specific sections.`,
+    // The same fact the sentence states, declared structurally so request-time
+    // pruning does not have to recognise this wording.
+    affordances: { ...result.affordances, externalizedAt: spillPath },
   }
 }

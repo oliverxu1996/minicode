@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { CODING_TOOLS } from "./tools"
+import { truncateOutput } from "./tools/truncate"
 
 const ctx = (cwd: string) => ({ cwd })
 
@@ -138,6 +139,44 @@ describe("coding tools (AC2/AC3/AC4)", () => {
     )
     expect(result.ok).toBe(false)
     expect(await Bun.file(join(dir, "none.txt")).text()).toBe(original)
+    cleanup()
+  })
+
+  test("bash does not discard output before the canonical cap can preserve it", async () => {
+    const { dir, cleanup } = tempWorkspace()
+    // Well past the 50KB tail-cap bash used to apply before the canonical layer
+    // ever saw the result.
+    const result = await CODING_TOOLS.get("bash")!.execute(
+      { command: "i=0; while [ $i -lt 20000 ]; do echo line-$i; i=$((i+1)); done" },
+      ctx(dir),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("unreachable")
+    // The head survives. It used to be thrown away, leaving the spill with
+    // only the tail and no way back to the beginning of the output.
+    expect(result.data).toContain("line-1\n")
+    expect(result.data).toContain("line-19999")
+    cleanup()
+  })
+
+  test("the canonical cap bounds the visible result and keeps the rest recoverable", async () => {
+    const { dir, cleanup } = tempWorkspace()
+    const produced = await CODING_TOOLS.get("bash")!.execute(
+      { command: "i=0; while [ $i -lt 20000 ]; do echo line-$i; i=$((i+1)); done" },
+      ctx(dir),
+    )
+    const capped = truncateOutput(produced, dir, "bash")
+    if (!capped.ok) throw new Error("unreachable")
+
+    // Bounded for the model…
+    expect(capped.data.length).toBeLessThan(1024)
+    // …and the withheld remainder is recoverable, in full, from the declaration
+    // rather than from the wording of the message.
+    const spillPath = capped.affordances?.externalizedAt
+    expect(spillPath).toBeDefined()
+    const spilled = await Bun.file(spillPath!).text()
+    expect(spilled).toContain("line-1\n")
+    expect(spilled).toContain("line-19999")
     cleanup()
   })
 

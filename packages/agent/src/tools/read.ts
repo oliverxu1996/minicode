@@ -149,6 +149,7 @@ async function listDirectory(filepath: string, opts: { offset: number; limit: nu
           : `\n(${sorted.length} entries)`,
         `</entries>`,
       ].join("\n"),
+      ...(truncated ? { affordances: { resumeOffset: opts.offset + sliced.length } } : {}),
     }
   } catch (err) {
     return { ok: false, error: `Error listing directory ${filepath}: ${err instanceof Error ? err.message : err}` }
@@ -255,7 +256,11 @@ function formatFileOutput(
   }
   output += "\n</content>"
 
-  return { ok: true, data: output }
+  // The same continuation the sentence offers, declared structurally so
+  // request-time pruning does not have to recognise this wording.
+  return result.cut || result.more
+    ? { ok: true, data: output, affordances: { resumeOffset: next } }
+    : { ok: true, data: output }
 }
 
 function levenshteinDistance(a: string, b: string): number {

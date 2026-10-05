@@ -6,6 +6,7 @@ import type {
   ModelUsage,
 } from "@minicode/model"
 import type { PruneStats } from "./prune"
+import type { ToolAffordances } from "../tools/types"
 
 /**
  * One durable conversation entry.
@@ -57,6 +58,14 @@ export interface ToolMessage extends BaseMessage {
    * semantics and the original output text byte-for-byte.
    */
   readonly failureEvidence?: boolean
+  /**
+   * How to recover output this turn no longer carries in full — declared by
+   * whichever layer capped it (a tool's own limit, or `truncateOutput`'s
+   * spill). Agent-local and durable, exactly like {@link failureEvidence}:
+   * request-time pruning reads it instead of parsing the result's prose, and
+   * it is stripped before the provider sees anything.
+   */
+  readonly affordances?: ToolAffordances
 }
 
 export type SessionMessage = UserMessage | AssistantMessage | ToolMessage

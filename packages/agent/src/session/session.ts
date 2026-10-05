@@ -3,6 +3,7 @@ import type { ModelIdentity, RunSummary, SessionMessage, SessionStatus } from ".
 import { ToolLedger } from "./ledger"
 import { pruneOldToolOutputs } from "./prune"
 import type { PruneContext, ProjectionMessage } from "./prune"
+import type { ToolAffordances } from "../tools/types"
 
 /** Error text for tool calls whose outcome is unknown after an
  *  interruption — never fabricated success. */
@@ -213,6 +214,17 @@ export class Session {
     ;(toolMsg as { failureEvidence?: boolean }).failureEvidence = true
   }
 
+  /**
+   * Records how to recover output this turn no longer carries in full —
+   * declared by whichever layer capped it. Durable, and honored by
+   * request-time pruning; see `ToolMessage.affordances`. Merged rather than
+   * replaced, so a tool's own offset survives the canonical spill.
+   */
+  markAffordances(toolMsg: SessionMessage & { role: "tool" }, affordances: ToolAffordances): void {
+    const target = toolMsg as { affordances?: ToolAffordances }
+    target.affordances = { ...target.affordances, ...affordances }
+  }
+
   /** Finds the tool result recorded for a toolCallId, if any. */
   findToolResult(toolCallId: string): ModelToolResult | undefined {
     for (const msg of this.messages) {
@@ -267,6 +279,7 @@ export class Session {
             role: m.role,
             content: m.content,
             ...(m.role === "tool" && m.failureEvidence === true ? { failureEvidence: true } : {}),
+            ...(m.role === "tool" && m.affordances !== undefined ? { affordances: m.affordances } : {}),
           }) as ProjectionMessage,
       ),
       context,

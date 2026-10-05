@@ -19,6 +19,36 @@ function agentFor(model: FakeModel): { agent: MiniCode; model: FakeModel; dir: s
 }
 
 describe("AgentLoop control flow (V2)", () => {
+  test("agent-local affordances never reach the provider request", async () => {
+    const { agent, model, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse([{
+        toolCallId: "call_1",
+        toolName: "bash",
+        input: { command: "i=0; while [ $i -lt 20000 ]; do echo line-$i; i=$((i+1)); done" },
+      }]),
+      textResponse("done"),
+    ]))
+    const session = agent.createSession(dir)
+
+    await agent.run(session, "big output", {})
+
+    // Large enough that the canonical cap externalized it…
+    const toolMsg = session.messages[2]
+    if (toolMsg.role !== "tool") throw new Error("expected tool message")
+    expect(toolMsg.affordances?.externalizedAt).toBeDefined()
+
+    // …but recovery metadata is durable agent state, not model-facing content.
+    for (const request of model.requests) {
+      for (const message of request.messages) {
+        expect("affordances" in message).toBe(false)
+        expect("failureEvidence" in message).toBe(false)
+      }
+    }
+    const wire = JSON.stringify(model.requests)
+    expect(wire).not.toContain("externalizedAt")
+    cleanup()
+  })
+
   test("bash defaults to the session workspace without rewriting the recorded call", async () => {
     const { agent, dir, cleanup } = agentFor(new FakeModel([
       toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "pwd" } }]),

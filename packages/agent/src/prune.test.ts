@@ -12,6 +12,7 @@ import {
 } from "./session/prune"
 import { Session } from "./session/session"
 import { truncateOutput } from "./tools/truncate"
+import type { ToolAffordances } from "./tools/types"
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -22,7 +23,7 @@ const user = (text: string): ProjectionMessage => ({ role: "user", content: text
 const tool = (
   toolCallId: string,
   text: string,
-  extra?: { failureEvidence?: boolean },
+  extra?: { failureEvidence?: boolean; affordances?: ToolAffordances },
 ): ProjectionMessage => ({
   role: "tool",
   content: [{ toolCallId, toolName: "bash", output: { type: "text", text } }],
@@ -243,10 +244,15 @@ describe("protected results are never withheld (I2/I3)", () => {
 // 11, 12 — recovery affordances (I5)
 // ---------------------------------------------------------------------------
 
-describe("mechanism 1 recovery affordances survive reduction (I5)", () => {
-  test("a spill pointer is preserved in the marker", () => {
+describe("declared recovery affordances survive reduction (I5)", () => {
+  test("a declared spill path is preserved in the marker", () => {
     const spilled = `head\n\n...4000 bytes truncated. Full content saved to: /tmp/.tool-output/bash-abc.txt\nUse read with offset/limit to view specific sections.`
-    const messages = [user("t1"), tool("spilled", spilled), user("t2"), tool("ok", "small")]
+    const messages = [
+      user("t1"),
+      tool("spilled", spilled, { affordances: { externalizedAt: "/tmp/.tool-output/bash-abc.txt" } }),
+      user("t2"),
+      tool("ok", "small"),
+    ]
     // Force over-budget so stage 1 fires on the spilled result.
     const projected = pruneOldToolOutputs(messages, { inputBudget: 1 })
 
@@ -255,14 +261,53 @@ describe("mechanism 1 recovery affordances survive reduction (I5)", () => {
     expect(marker.value.spillPath).toBe("/tmp/.tool-output/bash-abc.txt")
   })
 
-  test("a read continuation offset is preserved in the marker", () => {
+  test("a declared read offset is preserved in the marker", () => {
     const capped = `line1\nline2\n\n(Output capped at 50 KB. Showing lines 1-2000. Use offset=2001 to continue.)`
-    const messages = [user("t1"), tool("read", capped), user("t2"), tool("ok", "small")]
+    const messages = [
+      user("t1"),
+      tool("read", capped, { affordances: { resumeOffset: 2001 } }),
+      user("t2"),
+      tool("ok", "small"),
+    ]
     const projected = pruneOldToolOutputs(messages, { inputBudget: 1 })
 
     const marker = outputAt(projected[1])
     if (!isPrunedToolOutput(marker)) throw new Error("expected a marker")
     expect(marker.value.resumeOffset).toBe(2001)
+  })
+
+  // The decisive test for this boundary. Context policy must not depend on the
+  // wording a tool happens to use: the same declared affordance under
+  // deliberately different prose must produce the same marker. This failed
+  // under the previous implementation, whose regexes matched the old wording.
+  test("affordances survive when the visible prose is reworded", () => {
+    const reworded = `[truncated — the externalised copy holds the remainder]`
+    const messages = [
+      user("t1"),
+      tool("spilled", reworded, {
+        affordances: { externalizedAt: "/tmp/.tool-output/x.txt", resumeOffset: 42 },
+      }),
+      user("t2"),
+      tool("ok", "small"),
+    ]
+    const projected = pruneOldToolOutputs(messages, { inputBudget: 1 })
+
+    const marker = outputAt(projected[1])
+    if (!isPrunedToolOutput(marker)) throw new Error("expected a marker")
+    expect(marker.value.spillPath).toBe("/tmp/.tool-output/x.txt")
+    expect(marker.value.resumeOffset).toBe(42)
+  })
+
+  // The other half of the same boundary: prose is no longer evidence at all.
+  test("prose alone is not a recovery affordance", () => {
+    const proseOnly = `head\n\n...4000 bytes truncated. Full content saved to: /tmp/.tool-output/bash-abc.txt\nUse read with offset/limit to view specific sections.`
+    const messages = [user("t1"), tool("spilled", proseOnly), user("t2"), tool("ok", "small")]
+    const projected = pruneOldToolOutputs(messages, { inputBudget: 1 })
+
+    const marker = outputAt(projected[1])
+    if (!isPrunedToolOutput(marker)) throw new Error("expected a marker")
+    expect(marker.value.spillPath).toBeUndefined()
+    expect(marker.value.resumeOffset).toBeUndefined()
   })
 
   test("a plain result carries no recovery metadata", () => {

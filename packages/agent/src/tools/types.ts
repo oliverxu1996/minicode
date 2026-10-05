@@ -5,6 +5,24 @@
  * the message to the model, which decides how to react. Tool failures never
  * terminate a run by themselves.
  */
+/**
+ * Agent-local description of how to get back to output that a cap withheld.
+ *
+ * This is the structured counterpart to the human-readable hint in `data`. The
+ * model still reads the sentence ("Full content saved to: …", "Use offset=N to
+ * continue."); context policy reads *this* instead of parsing that sentence, so
+ * rewording a tool's message can no longer silently break recovery.
+ *
+ * Like `failureEvidence`, it is declared by whichever layer performed the cap
+ * and never reaches the provider — `ModelToolResult` has no such field.
+ */
+export interface ToolAffordances {
+  /** File holding the full output, when a cap externalized it. */
+  readonly externalizedAt?: string
+  /** Offset to continue a capped read from. */
+  readonly resumeOffset?: number
+}
+
 export type ToolResult =
   | {
       readonly ok: true
@@ -17,6 +35,8 @@ export type ToolResult =
        * pruning.
        */
       readonly failureEvidence?: true
+      /** How to recover output this result no longer carries in full. */
+      readonly affordances?: ToolAffordances
     }
   | { readonly ok: false; readonly error: string }
 

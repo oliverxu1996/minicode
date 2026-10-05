@@ -2,7 +2,6 @@ import type { Tool, ToolExecutionContext, ToolResult } from "./types"
 
 const DEFAULT_TIMEOUT = 120_000
 const MAX_TIMEOUT = 600_000
-const MAX_OUTPUT_BYTES = 50 * 1024
 
 /** Exit-code sentinel appended to output so the model always sees the
  *  command result; a non-zero exit is data, not a runtime failure. */
@@ -102,14 +101,14 @@ export const bashTool: Tool = {
     if (timeoutController.signal.aborted) {
       return {
         ok: false,
-        error: `Command timed out after ${formatDuration(effectiveTimeout)}.\nPartial output:\n${truncate(result.stdout, result.stderr)}`,
+        error: `Command timed out after ${formatDuration(effectiveTimeout)}.\nPartial output:\n${combine(result.stdout, result.stderr)}`,
       }
     }
 
     // A non-zero exit is `ok: true` — exit codes are data, not tool errors.
     // The text stays byte-identical; `failureEvidence` only records that the
     // command *observed* a failure, so request-time pruning keeps it.
-    const data = `${truncate(result.stdout, result.stderr)}\n(exit code: ${result.exitCode})`
+    const data = `${combine(result.stdout, result.stderr)}\n(exit code: ${result.exitCode})`
     return result.exitCode === 0
       ? { ok: true, data }
       : { ok: true, data, failureEvidence: true }
@@ -122,20 +121,19 @@ function resolveWorkdir(workdir: string, cwd?: string): string {
   return resolved.replace(/\/+$/, "") || "/"
 }
 
-function truncate(stdout: string, stderr: string): string {
-  let combined = stdout
-  if (stderr) combined += `\n(stderr)\n${stderr}`
-  const totalBytes = Buffer.byteLength(combined, "utf-8")
-  if (totalBytes <= MAX_OUTPUT_BYTES) return combined
-
-  const buf = Buffer.from(combined, "utf-8")
-  let start = buf.length - MAX_OUTPUT_BYTES
-  if (start < 0) start = 0
-  while (start < buf.length && (buf[start] & 0xc0) === 0x80) start++
-  const preview = buf.subarray(start).toString("utf-8")
-  const kb = (totalBytes / 1024).toFixed(1)
-  const cap = `${MAX_OUTPUT_BYTES / 1024}KB`
-  return `(Output truncated to last ${cap}. Full output was approximately ${kb}KB. Use a more specific command to reduce output.)\n\n${preview}`
+/**
+ * Joins the two streams. Deliberately does NOT cap: the size bound belongs to
+ * the canonical cap in `truncate.ts`, which both limits what the model sees and
+ * keeps the full text recoverable.
+ *
+ * This used to keep only the last 50KB and drop the head with no way back. The
+ * cut ran after `readStreaming` had already accumulated every byte and after
+ * `Promise.all` had awaited both pipes, so it never protected memory or the
+ * runtime — all it did was discard the head immediately before the canonical
+ * cap would have spilled the whole output for recovery.
+ */
+function combine(stdout: string, stderr: string): string {
+  return stderr ? `${stdout}\n(stderr)\n${stderr}` : stdout
 }
 
 function formatDuration(ms: number): string {

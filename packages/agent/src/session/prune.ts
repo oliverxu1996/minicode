@@ -1,5 +1,6 @@
 import type { ModelMessage, ModelToolOutput, ModelToolResult } from "@minicode/model"
 import { estimateTokens } from "../context-budget"
+import type { ToolAffordances } from "../tools/types"
 
 /**
  * Namespaced discriminator for a pruning marker.
@@ -14,7 +15,11 @@ const PRUNED_KEY = "minicodePruned"
 export type PruneReason = "request-over-budget"
 
 /** A `ToolMessage` plus Agent-local metadata that never reaches the provider. */
-export type ProjectionMessage = ModelMessage & { readonly failureEvidence?: boolean }
+export type ProjectionMessage = ModelMessage & {
+  readonly failureEvidence?: boolean
+  /** Declared by whichever layer capped the result — see `ToolAffordances`. */
+  readonly affordances?: ToolAffordances
+}
 
 /** What one pruning pass actually removed. */
 export interface PruneStats {
@@ -84,22 +89,19 @@ export function isPrunedToolOutput(
   return typeof value === "object" && value !== null && (value as Record<string, unknown>)[PRUNED_KEY] === true
 }
 
-// Affordances emitted by mechanism 1 (`tools/truncate.ts`) and by `read`.
-const SPILL_PATTERN = /Full content saved to: ([^\n]+)/
-const OFFSET_PATTERN = /Use offset=(\d+) to continue/
-
-function recoveryHint(text: string): { spillPath?: string; resumeOffset?: number } {
-  const hint: { spillPath?: string; resumeOffset?: number } = {}
-  const spill = SPILL_PATTERN.exec(text)
-  if (spill !== null) hint.spillPath = spill[1].trim()
-  const offset = OFFSET_PATTERN.exec(text)
-  if (offset !== null) hint.resumeOffset = Number(offset[1])
-  return hint
-}
-
+/**
+ * The marker that replaces a withheld result.
+ *
+ * Recovery affordances come from the result's declared metadata, never from
+ * its prose. This module used to regex-match the sentences emitted by
+ * `tools/truncate.ts` and `read` ("Full content saved to: …", "Use offset=N to
+ * continue."), which meant rewording a tool's user-facing message silently
+ * removed the model's way back to the content. The producer now declares the
+ * fact structurally and this layer consumes it; no wording is load-bearing.
+ */
 function markerFor(
   result: ModelToolResult,
-  text: string,
+  affordances: ToolAffordances | undefined,
   excerpt: string | undefined,
   originalBytes: number,
 ): ModelToolResult {
@@ -112,7 +114,8 @@ function markerFor(
         reason: "request-over-budget",
         toolName: result.toolName,
         originalBytes,
-        ...recoveryHint(text),
+        ...(affordances?.externalizedAt === undefined ? {} : { spillPath: affordances.externalizedAt }),
+        ...(affordances?.resumeOffset === undefined ? {} : { resumeOffset: affordances.resumeOffset }),
         ...(excerpt === undefined ? {} : { excerpt }),
       },
     },
@@ -212,10 +215,11 @@ export function pruneOldToolOutputs(
       if (!isReducible(projection[i], result)) continue
       const text = textOf(result)
       const bytes = Buffer.byteLength(text, "utf-8")
+      const affordances = projection[i].affordances
       projection[i] = {
         ...projection[i],
         content: current.map((candidate, ri) =>
-          ri === r ? markerFor(result, text, undefined, bytes) : candidate,
+          ri === r ? markerFor(result, affordances, undefined, bytes) : candidate,
         ),
       } as ProjectionMessage
       recordReduction(bytes)
@@ -246,7 +250,7 @@ export function pruneOldToolOutputs(
           projection[i] = {
             ...projection[i],
             content: content.map((candidate, ri) =>
-              ri === r ? markerFor(result, text, excerpt, bytes) : candidate),
+              ri === r ? markerFor(result, projection[i].affordances, excerpt, bytes) : candidate),
           } as ProjectionMessage
           if (!recorded) {
             recorded = true
