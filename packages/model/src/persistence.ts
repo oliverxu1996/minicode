@@ -18,8 +18,8 @@ interface PersistedState {
 const EMPTY_STATE: PersistedState = { version: 1, models: [], activeModelId: null }
 
 /** Location of the configuration file, under the OS user config directory.
- *  Follows the same env-override convention as the catalog cache
- *  (`XDG_CONFIG_HOME`), so tests and alternative installs can redirect it. */
+ *  Honors `XDG_CONFIG_HOME`, so tests and alternative installs can redirect
+ *  it — the same convention the session store uses. */
 function configPath(): string {
   const base = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config")
   return join(base, "minicode", "models.json")

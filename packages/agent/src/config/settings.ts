@@ -112,9 +112,3 @@ export function loadSettings(cwd: string): LoadedSettings {
   const merged = deepMerge(deepMerge(DEFAULTS, global), project)
   return { settings: merged, globalPath, projectPath, projectExists }
 }
-
-/** Writes a settings file (creates directories). */
-export function saveSettings(path: string, settings: MiniCodeSettings): void {
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, JSON.stringify(settings, null, 2), "utf-8")
-}

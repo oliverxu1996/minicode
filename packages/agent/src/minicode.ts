@@ -116,11 +116,6 @@ export class MiniCode {
     return manager.active()
   }
 
-  /** Display label of the model a run would use right now. */
-  async currentModelLabel(): Promise<string> {
-    return (await this.currentModel())?.id ?? "no model"
-  }
-
   /** The persisted model configuration manager (model lifecycle commands). */
   async modelManager(): Promise<ModelManager> {
     return ModelManager.load()
@@ -168,22 +163,25 @@ export class MiniCode {
     }> = []
     for (const id of await this.store.list()) {
       try {
-        const json = await this.store.read(id) as Record<string, unknown>
-        const messages = (json.messages ?? []) as Array<{ role: string; content: unknown; timestamp?: number }>
-        const firstUser = messages.find(m => m.role === "user")
+        // The same validating parser the rest of the runtime uses. A summary
+        // is a view of a session, so it must not be a second, unchecked
+        // interpretation of the persisted format — the picker's counts and
+        // titles could otherwise disagree with the session actually loaded.
+        const session = Session.fromJSON(await this.store.read(id) as Record<string, unknown>)
+        const firstUser = session.messages.find(m => m.role === "user")
         out.push({
-          id: typeof json.id === "string" ? json.id : id,
-          cwd: typeof json.cwd === "string" ? json.cwd : "",
-          title: typeof json.title === "string" ? json.title : null,
-          parentSessionId: typeof json.parentSessionId === "string" ? json.parentSessionId : null,
-          updatedAt: typeof json.updatedAt === "number" ? json.updatedAt : 0,
-          messageCount: messages.length,
+          id: session.id,
+          cwd: session.cwd,
+          title: session.title,
+          parentSessionId: session.parentSessionId,
+          updatedAt: session.updatedAt,
+          messageCount: session.messages.length,
           firstUser: firstUser !== undefined && typeof firstUser.content === "string"
             ? firstUser.content.slice(0, 60)
             : null,
         })
       } catch {
-        // Corrupt file — skip.
+        // Unreadable or invalid session — skip.
       }
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt)

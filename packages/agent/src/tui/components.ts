@@ -93,12 +93,6 @@ export class ToolExecutionComponent implements Component {
 	/** Required by the component interface; nothing to invalidate. */
 	invalidate(): void {}
 
-	/** Refresh the arguments while the call is pending. */
-	setInput(input: Record<string, unknown>): void {
-		this.input = input
-		this.rebuild()
-	}
-
 	/** Live partial output while the tool is still running (bash). */
 	setProgress(text: string): void {
 		if (this.state !== "running") return

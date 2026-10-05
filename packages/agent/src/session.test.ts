@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Model } from "@minicode/model"
@@ -8,7 +8,7 @@ import { Session, UNKNOWN_OUTCOME_ERROR } from "./session/session"
 import { SessionStore } from "./session/store"
 import { ToolLedger, toolDurationMs } from "./session/ledger"
 import { CODING_TOOLS } from "./tools"
-import { executeTool } from "./loop/run"
+import { executeTool } from "./loop/execute"
 import { FakeModel, textResponse } from "./testing"
 
 function tempDir(): { dir: string; cleanup: () => void } {
@@ -243,6 +243,92 @@ describe("Usage detail persistence (O1)", () => {
     const persisted = await reloadAsNewProcess(session)
     expect(persisted.runs[0]?.usage).toEqual(providerUsage)
     cleanup()
+  })
+})
+
+describe("session summaries use the validating parser", () => {
+  function summaryHarness() {
+    const { dir, cleanup } = tempDir()
+    const sessionsDir = join(dir, "sessions")
+    return {
+      sessionsDir,
+      agent: new MiniCode({ sessionsDir }),
+      fresh: () => new MiniCode({ sessionsDir }),
+      cleanup,
+    }
+  }
+
+  test("a valid session summary agrees with loading that session", async () => {
+    const h = summaryHarness()
+    const session = h.agent.createSession("/tmp/summary-ws")
+    session.pushUser("hello there")
+    session.appendAssistant([{ type: "text", text: "hi" }], {})
+    session.title = "my session"
+    await session.checkpoint()
+
+    const [summary] = await h.fresh().sessionSummaries()
+    expect(summary).toBeDefined()
+    expect(summary!.id).toBe(session.id)
+    expect(summary!.title).toBe("my session")
+    expect(summary!.firstUser).toBe("hello there")
+    // The picker and the loaded session cannot disagree about size.
+    const loaded = await h.fresh().loadSession(session.id)
+    expect(summary!.messageCount).toBe(loaded.messages.length)
+    h.cleanup()
+  })
+
+  // The old summary path cast `json.messages` unchecked and took `.length`. On
+  // a corrupt snapshot that is not merely lenient, it is nonsense — a string
+  // field yields its character count. The validating parser is what loading
+  // already used, so the picker now reports what a load would produce.
+  test("a corrupted messages field is validated, not counted raw", async () => {
+    const h = summaryHarness()
+    const session = h.agent.createSession("/tmp/summary-ws")
+    session.pushUser("real message")
+    await session.checkpoint()
+
+    const file = join(h.sessionsDir, `${session.id}.json`)
+    const json = JSON.parse(readFileSync(file, "utf-8"))
+    json.messages = "not-an-array"
+    writeFileSync(file, JSON.stringify(json))
+
+    const [summary] = await h.fresh().sessionSummaries()
+    expect(summary).toBeDefined()
+    expect(summary!.messageCount).toBe(0)
+    h.cleanup()
+  })
+
+  test("invalid entries are dropped rather than counted", async () => {
+    const h = summaryHarness()
+    const session = h.agent.createSession("/tmp/summary-ws")
+    session.pushUser("real message")
+    await session.checkpoint()
+
+    const file = join(h.sessionsDir, `${session.id}.json`)
+    const json = JSON.parse(readFileSync(file, "utf-8"))
+    json.messages = [
+      { role: "user", content: "kept", timestamp: 1 },
+      { role: "bogus", content: "dropped" },
+      "garbage",
+    ]
+    writeFileSync(file, JSON.stringify(json))
+
+    const [summary] = await h.fresh().sessionSummaries()
+    expect(summary!.messageCount).toBe(1)
+    expect(summary!.firstUser).toBe("kept")
+    h.cleanup()
+  })
+
+  test("normal session loading is unaffected", async () => {
+    const h = summaryHarness()
+    const session = h.agent.createSession("/tmp/summary-ws")
+    session.pushUser("round trip")
+    await session.checkpoint()
+
+    const loaded = await h.fresh().loadSession(session.id)
+    expect(loaded.messages).toHaveLength(1)
+    expect((loaded.messages[0] as { content: string }).content).toBe("round trip")
+    h.cleanup()
   })
 })
 

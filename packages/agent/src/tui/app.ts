@@ -43,7 +43,7 @@ import {
 	userMessage,
 } from "./components"
 
-const IGNORED = new Set([".git", "node_modules", ".tool-output", ".minicode"])
+
 
 /** Applies a footer segment's tone. The projection decides meaning, not color. */
 function toneFor(segment: FooterSegment): string {
@@ -249,35 +249,6 @@ export class MiniCodeTui {
 			void this.submit(text)
 		}
 		return editor
-	}
-
-	private workspaceFiles(): string[] {
-		const out: string[] = []
-		const walk = (dir: string, rel: string, depth: number): void => {
-			if (out.length >= 200 || depth > 8) return
-			let entries
-			try {
-				entries = readdirSync(dir)
-			} catch {
-				return
-			}
-			for (const entry of entries) {
-				if (out.length >= 200) return
-				if (IGNORED.has(entry)) continue
-				const full = join(dir, entry)
-				const relative = rel === "" ? entry : `${rel}/${entry}`
-				let isDir = false
-				try {
-					isDir = statSync(full).isDirectory()
-				} catch {
-					continue
-				}
-				if (isDir) walk(full, relative, depth + 1)
-				else out.push(relative)
-			}
-		}
-		walk(this.session.cwd, "", 0)
-		return out
 	}
 
 	// ── global keys ───────────────────────────────────
@@ -676,13 +647,6 @@ export class MiniCodeTui {
 		if (this.session.needsRecovery()) {
 			this.chat.addChild(notice("interrupted run detected — it will be reconciled on the next task"))
 		}
-	}
-
-	addMessage(message: SessionMessage): void {
-		for (const component of replayMessage(message, new Map())) {
-			this.chat.addChild(component)
-		}
-		this.tui.requestRender()
 	}
 
 	// ── lifecycle ────────────────────────────────────────────────────

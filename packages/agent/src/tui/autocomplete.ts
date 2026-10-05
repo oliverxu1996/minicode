@@ -1,8 +1,8 @@
 import { readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import type { AutocompleteProvider, AutocompleteSuggestions } from "@minicode/tui"
+import { IGNORED_WORKSPACE_ENTRIES } from "../workspace-ignored"
 
-const IGNORED = new Set([".git", "node_modules", ".tool-output", ".minicode"])
 const MAX_FILES = 200
 
 /**
@@ -80,7 +80,7 @@ export class MiniCodeAutocomplete implements AutocompleteProvider {
       }
       for (const entry of entries) {
         if (out.length >= MAX_FILES) return
-        if (IGNORED.has(entry)) continue
+        if (IGNORED_WORKSPACE_ENTRIES.has(entry)) continue
         const full = join(dir, entry)
         const relative = rel === "" ? entry : `${rel}/${entry}`
         let isDir = false

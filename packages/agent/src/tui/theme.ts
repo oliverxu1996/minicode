@@ -36,16 +36,3 @@ export function markdownTheme(): MarkdownTheme {
 		underline: (text) => ansi.underline(text),
 	}
 }
-
-export function editorTheme(): import("@minicode/tui").EditorTheme {
-	return {
-		borderColor: (text) => ansi.gray(text),
-		selectList: {
-			selectedPrefix: (text) => ansi.green(text),
-			selectedText: (text) => ansi.bold(text),
-			description: (text) => ansi.gray(text),
-			scrollInfo: (text) => ansi.gray(text),
-			noMatch: (text) => ansi.red(text),
-		},
-	}
-}

@@ -71,8 +71,12 @@ export interface PrunedToolOutput {
   /**
    * Recovery affordances carried over verbatim from the output being
    * replaced, so request-time reduction never destroys a way back to the
-   * content. Populated from the strings mechanism 1 already emits — this is
-   * not a new recovery subsystem.
+   * content.
+   *
+   * They arrive structurally: the capping layer declares a `ToolAffordances`
+   * on the tool result, `ToolMessage` carries it, and this projection reads it
+   * off the message. Nothing here inspects the result's prose, so a tool is
+   * free to reword its visible message without breaking recovery.
    */
   readonly spillPath?: string
   readonly resumeOffset?: number

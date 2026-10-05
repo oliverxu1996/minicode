@@ -1,10 +1,10 @@
 import { readdir } from "node:fs/promises"
 import * as path from "node:path"
+import { IGNORED_WORKSPACE_ENTRIES } from "../workspace-ignored"
 import type { Tool, ToolExecutionContext, ToolResult } from "./types"
 import { resolveToolPath } from "./types"
 
 const MAX_RESULTS = 200
-const IGNORED_DIRS = new Set([".git", "node_modules", ".tool-output", ".minicode"])
 
 export const findTool: Tool = {
   idempotent: true,
@@ -44,7 +44,7 @@ export const findTool: Tool = {
         if (results.length >= MAX_RESULTS) return
         const rel = relBase === "" ? entry.name : `${relBase}/${entry.name}`
         if (entry.isDirectory()) {
-          if (IGNORED_DIRS.has(entry.name)) continue
+          if (IGNORED_WORKSPACE_ENTRIES.has(entry.name)) continue
           await walk(path.join(dirPath, entry.name), rel)
         } else if (globber.match(rel)) {
           results.push(rel)
