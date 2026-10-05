@@ -1,8 +1,7 @@
 import { MiniCode } from "@minicode/agent"
-import type { RunSummary } from "@minicode/agent"
 import { MINICODE_VERSION } from "./version"
 import { MiniCodeTui } from "./app"
-import { resultLine } from "./projection"
+import { runPrint } from "./print"
 
 /**
  * MiniCode entry point.
@@ -133,35 +132,12 @@ export async function runCli(argv: string[], io: CliIO): Promise<number | null> 
 
   const args = parseArgs(argv)
 
-  // ── non-interactive modes ────────────────────────────────────────
+  // ── non-interactive mode ─────────────────────────────────────────
   if (args.print !== null) {
     const agent = new MiniCode()
     const { session } = await resolveSession(agent, args)
     const active = session ?? agent.createSession(args.cwd)
-
-    // The run's own record, taken from the stream rather than rebuilt, so the
-    // final line carries the same summary the session persists.
-    let run: RunSummary | undefined
-    const result = await agent.run(active, args.print, {
-      onEvent: event => {
-        if (event.type === "run_end") run = event.run
-        if (args.jsonMode) {
-          io.stdout(JSON.stringify(event) + "\n")
-        }
-      },
-    })
-
-    if (args.jsonMode) {
-      io.stdout(JSON.stringify(resultLine(result.finishReason, result.iterations, result.error, run)) + "\n")
-    } else {
-      const last = active.lastAssistant()
-      const text = last !== undefined
-        ? last.content.filter(part => part.type === "text").map(part => part.text).join("")
-        : ""
-      io.stdout(text + "\n")
-      if (result.error !== undefined) io.stderr(`minicode: ${result.error}\n`)
-    }
-    return result.finishReason === "stop" ? 0 : 1
+    return runPrint(agent, active, args.print, args.jsonMode, io)
   }
 
   // ── interactive TUI ──────────────────────────────────────────────
