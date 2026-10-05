@@ -15,11 +15,14 @@ import type { PruneStats } from "./prune"
  * transformation — tool calls live in assistant messages, results in
  * `role: "tool"` messages, correlated by `toolCallId`.
  *
- * `status` tracks the message lifecycle: an assistant message is appended
- * `complete` (generation is atomic per model call); `interrupted` appears
- * only through crash recovery of an in-flight run.
+ * `status` tracks the message lifecycle. Generation is atomic per model call,
+ * so an appended message is always `complete`; a run interrupted mid-flight is
+ * recorded on the SESSION (`SessionStatus`), never on the individual message.
+ * The former `"interrupted"` member was unproducible — nothing ever assigned
+ * it, and loading a persisted session coerces every message to `complete` —
+ * so it was removed rather than left to read as a live state.
  */
-export type SessionMessageStatus = "complete" | "interrupted"
+export type SessionMessageStatus = "complete"
 
 export interface BaseMessage {
   readonly id: string

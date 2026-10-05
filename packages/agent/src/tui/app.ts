@@ -209,6 +209,7 @@ export class MiniCodeTui {
 				await this.submit(text)
 			},
 			skills: (): Skill[] => this.currentSkills,
+			reloadResources: (): void => this.refreshTemplates(),
 		}
 	}
 

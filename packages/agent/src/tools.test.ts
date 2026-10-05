@@ -77,6 +77,70 @@ describe("coding tools (AC2/AC3/AC4)", () => {
     cleanup()
   })
 
+  test("edit refuses two plausible fuzzy matches without replaceAll", async () => {
+    const { dir, cleanup } = tempWorkspace()
+    // Neither block appears verbatim, so the exact replacer cannot fire; the
+    // match is found by a fuzzy strategy. Two plausible blocks means the tool
+    // must not guess which one the model meant.
+    //
+    // The oldString is deliberately LONGER than either block: that leaves
+    // context-aware as the strategy that sees both, which is the path whose
+    // reported count was hardcoded to 1.
+    const block = (n: string): string => `function alpha() {\n  return ${n}\n}`
+    const original = `${block("1111")}\n${block("2222")}\n`
+    writeFileSync(join(dir, "fuzzy.txt"), original)
+    const longOldString = "function alpha() {\n" + "  return 0000\n".repeat(5) + "}"
+    const result = await CODING_TOOLS.get("edit")!.execute(
+      { filePath: "fuzzy.txt", oldString: longOldString, newString: "REPLACED" },
+      ctx(dir),
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toContain("2 occurrences")
+    // Refusing to guess means refusing to write.
+    expect(await Bun.file(join(dir, "fuzzy.txt")).text()).toBe(original)
+    cleanup()
+  })
+
+  test("edit refuses two plausible anchor matches without replaceAll", async () => {
+    const { dir, cleanup } = tempWorkspace()
+    const original = "function alpha() {\n  return 1111\n}\n\nfunction alpha() {\n  return 2222\n}\n"
+    writeFileSync(join(dir, "anchor.txt"), original)
+    const result = await CODING_TOOLS.get("edit")!.execute(
+      { filePath: "anchor.txt", oldString: "function alpha() {\n  return 0000\n}", newString: "REPLACED" },
+      ctx(dir),
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toContain("occurrences")
+    expect(await Bun.file(join(dir, "anchor.txt")).text()).toBe(original)
+    cleanup()
+  })
+
+  test("edit applies a single unambiguous fuzzy match", async () => {
+    const { dir, cleanup } = tempWorkspace()
+    writeFileSync(join(dir, "one.txt"), "function alpha() {\n  return 1111\n}\n")
+    const longOldString = "function alpha() {\n" + "  return 0000\n".repeat(5) + "}"
+    const result = await CODING_TOOLS.get("edit")!.execute(
+      { filePath: "one.txt", oldString: longOldString, newString: "function alpha() {\n  return 9999\n}" },
+      ctx(dir),
+    )
+    expect(result.ok).toBe(true)
+    expect(await Bun.file(join(dir, "one.txt")).text()).toBe("function alpha() {\n  return 9999\n}\n")
+    cleanup()
+  })
+
+  test("edit reports a miss when nothing matches at all", async () => {
+    const { dir, cleanup } = tempWorkspace()
+    const original = "function alpha() {\n  return 1111\n}\n"
+    writeFileSync(join(dir, "none.txt"), original)
+    const result = await CODING_TOOLS.get("edit")!.execute(
+      { filePath: "none.txt", oldString: "totally\nunrelated\ncontent", newString: "REPLACED" },
+      ctx(dir),
+    )
+    expect(result.ok).toBe(false)
+    expect(await Bun.file(join(dir, "none.txt")).text()).toBe(original)
+    cleanup()
+  })
+
   test("edit with empty oldString creates the file", async () => {
     const { dir, cleanup } = tempWorkspace()
     const result = await CODING_TOOLS.get("edit")!.execute({

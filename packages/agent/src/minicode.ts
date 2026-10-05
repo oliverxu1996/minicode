@@ -189,10 +189,6 @@ export class MiniCode {
     return out.sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
-  /** Reloads per-run caches (settings/context/resources load per run, so
-   *  this is a checkpoint in the flow for the /reload command). */
-  refreshRuntime(): void {}
-
   private track(session: Session): void {
     this.sessions.set(session.id, session)
     session.onCheckpoint(async () => {

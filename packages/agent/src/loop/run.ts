@@ -223,10 +223,17 @@ export async function executeTool(
 ): Promise<void> {
   const emit = opts.onEvent ?? (() => {})
 
-  // The bash tool runs in the session workspace unless told otherwise.
-  if (name === "bash" && (input.workdir === undefined || input.workdir === "") && session.cwd) {
-    input.workdir = session.cwd
-  }
+  // The bash tool runs in the session workspace unless told otherwise. That
+  // default is resolved into a LOCAL execution input rather than written back
+  // into `input`: `input` is the object the assistant message holds by
+  // reference, so mutating it here rewrote durable history — the recorded call
+  // no longer stated what the model actually asked for. The same object is
+  // also recorded in the ledger and emitted in `tool_call`, so all three now
+  // reflect the model's request, and execution still gets the workspace.
+  const execInput =
+    name === "bash" && (input.workdir === undefined || input.workdir === "") && session.cwd
+      ? { ...input, workdir: session.cwd }
+      : input
 
   if (!opts.reissue) {
     emit({ type: "tool_call", iteration: opts.iteration, toolCallId, name, input })
@@ -246,7 +253,7 @@ export async function executeTool(
     output = { ok: false, error: `unknown tool ${name}` }
   } else {
     try {
-      output = await tool.execute(input, {
+      output = await tool.execute(execInput, {
         toolCallId,
         cwd: session.cwd,
         signal: opts.signal,

@@ -140,14 +140,6 @@ function levenshtein(a: string, b: string): number {
   return prev[b.length]
 }
 
-function replaceBlock(start: number, end: number, replacement: string): ReplaceFn {
-  return c => {
-    const ls = c.split("\n")
-    ls.splice(start, end - start + 1, replacement)
-    return ls.join("\n")
-  }
-}
-
 function simpleReplacer(content: string, oldStr: string, newStr: string): ReplacerMatch | null {
   let count = 0
   let pos = -1
@@ -366,12 +358,33 @@ function contextAwareReplacer(content: string, oldStr: string, newStr: string): 
 
   if (candidates.length === 0) return null
   candidates.sort((a, b) => b.score - a.score)
-  const best = candidates[0]
-  return { count: 1, replace: replaceBlock(best.start, best.end, newStr) }
-}
 
-function multiOccurrenceReplacer(content: string, oldStr: string, newStr: string): ReplacerMatch | null {
-  return simpleReplacer(content, oldStr, newStr)
+  // Report how many distinct places the edit would land. Hardcoding 1 here made
+  // the caller's ambiguity guard unreachable, so an ambiguous fuzzy match was
+  // replaced silently at the best-scoring candidate — the opposite of the
+  // documented "refuse when ambiguous". The count is the guard's only input.
+  //
+  // Two candidates can describe overlapping regions (a later first-anchor may
+  // sit inside an earlier candidate's block). Those are one place, not two, so
+  // they are collapsed before counting; the best-scoring interpretation wins.
+  const chosen: Array<{ start: number; end: number }> = []
+  for (const candidate of candidates) {
+    const overlaps = chosen.some(o => candidate.start <= o.end && o.start <= candidate.end)
+    if (!overlaps) chosen.push({ start: candidate.start, end: candidate.end })
+  }
+  chosen.sort((a, b) => a.start - b.start)
+
+  return {
+    count: chosen.length,
+    replace: c => {
+      const ls = c.split("\n")
+      // Backwards so each splice leaves the earlier indices valid.
+      for (let m = chosen.length - 1; m >= 0; m--) {
+        ls.splice(chosen[m].start, chosen[m].end - chosen[m].start + 1, newStr)
+      }
+      return ls.join("\n")
+    },
+  }
 }
 
 const REPLACERS: Array<[string, Replacer]> = [
@@ -383,5 +396,4 @@ const REPLACERS: Array<[string, Replacer]> = [
   ["escape-normalized", escapeNormalizedReplacer],
   ["trimmed-boundary", trimmedBoundaryReplacer],
   ["context-aware", contextAwareReplacer],
-  ["multi-occurrence", multiOccurrenceReplacer],
 ]

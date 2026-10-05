@@ -30,6 +30,13 @@ export interface CommandContext {
   submitTask(text: string): Promise<void>
   /** The skills currently available to the model. */
   skills(): Skill[]
+  /**
+   * Re-reads project settings, context, prompts and skills into the UI's own
+   * caches. The runtime reloads these per run already; this exists for the
+   * copies the TUI holds (prompt templates, the skill list), which otherwise
+   * stay as they were when the app started.
+   */
+  reloadResources(): void
 }
 
 export interface Command {
@@ -291,7 +298,10 @@ export const COMMANDS: Command[] = [
     name: "reload",
     description: "Reload settings, project context, prompts, and skills",
     async execute(ctx) {
-      await ctx.agent().refreshRuntime()
+      // The runtime reads settings/context/resources per run, so nothing there
+      // needs refreshing; the TUI's own cached copies do. Refresh those, then
+      // the confirmation below is true rather than merely printed.
+      ctx.reloadResources()
       ctx.notify("reloaded settings, project context, prompts, and skills")
     },
   },

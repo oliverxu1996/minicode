@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { ModelError } from "@minicode/model"
 import type { RunEvent, RunSummary } from "./session/types"
 import { FakeModel, textResponse, toolCallResponse } from "./testing"
@@ -19,6 +19,33 @@ function agentFor(model: FakeModel): { agent: MiniCode; model: FakeModel; dir: s
 }
 
 describe("AgentLoop control flow (V2)", () => {
+  test("bash defaults to the session workspace without rewriting the recorded call", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "pwd" } }]),
+      textResponse("done"),
+    ]))
+    const session = agent.createSession(dir)
+
+    await agent.run(session, "where am i", {})
+
+    // The runtime default still applies: bash ran in the session workspace.
+    const toolMsg = session.messages[2]
+    if (toolMsg.role !== "tool") throw new Error("expected tool message")
+    const part = toolMsg.content[0] as unknown as { output: { type: string; text: string } }
+    expect(part.output.text).toContain(basename(dir))
+
+    // …but the call the model actually made is what durable history keeps. The
+    // workspace default is resolved into a local execution input rather than
+    // written back into the object the assistant message holds by reference, so
+    // the recorded request is not edited by the executor.
+    const assistantMsg = session.messages[1]
+    if (assistantMsg.role !== "assistant") throw new Error("expected assistant message")
+    const call = assistantMsg.content[0] as unknown as { input: Record<string, unknown> }
+    expect(call.input).toEqual({ command: "pwd" })
+    expect("workdir" in call.input).toBe(false)
+    cleanup()
+  })
+
   test("tool call executes, result returns to model, next iteration finishes (AC1/AC5)", async () => {
     const { agent, model, dir, cleanup } = agentFor(new FakeModel([
       toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "echo runtime-ok" } }]),

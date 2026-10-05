@@ -110,7 +110,6 @@ export class Session {
     if (session.status === "running") session.status = "interrupted"
     session._needsRecovery =
       session.status === "interrupted"
-      || session.messages.some(m => m.status === "interrupted")
       || session.ledger.hasUnfinished()
     return session
   }
