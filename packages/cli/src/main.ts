@@ -1,6 +1,6 @@
-import { MiniCode } from "../minicode"
-import type { RunSummary } from "../session/types"
-import { MINICODE_VERSION } from "../version"
+import { MiniCode } from "@minicode/agent"
+import type { RunSummary } from "@minicode/agent"
+import { MINICODE_VERSION } from "./version"
 import { MiniCodeTui } from "./app"
 import { resultLine } from "./projection"
 
@@ -8,7 +8,7 @@ import { resultLine } from "./projection"
  * MiniCode entry point.
  *
  * ```txt
- * bun packages/agent/src/tui/main.ts [options] [workspace-directory]
+ * bun packages/cli/src/main.ts [options] [workspace-directory]
  * ```
  *
  * The same entry point backs every distribution: running from a checkout, the

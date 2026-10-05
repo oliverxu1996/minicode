@@ -1,5 +1,5 @@
 {
-  "name": "minicode",
+  "name": "@minicode/cli",
   "version": "0.1.0",
   "description": "MiniCode — a terminal coding agent that works directly in your repository",
   "license": "Apache-2.0",
@@ -24,5 +24,10 @@
     "get-east-asian-width": "1.6.0",
     "marked": "18.0.11",
     "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@minicode/agent": "workspace:*",
+    "@minicode/model": "workspace:*",
+    "@minicode/tui": "workspace:*"
   }
 }

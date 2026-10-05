@@ -1,7 +1,7 @@
 import { readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import type { AutocompleteProvider, AutocompleteSuggestions } from "@minicode/tui"
-import { IGNORED_WORKSPACE_ENTRIES } from "../workspace-ignored"
+import { IGNORED_WORKSPACE_ENTRIES } from "@minicode/agent"
 
 const MAX_FILES = 200
 

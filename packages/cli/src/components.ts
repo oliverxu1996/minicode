@@ -1,5 +1,5 @@
 import { Box, Container, Markdown, Spacer, Text, type Component } from "@minicode/tui"
-import type { SessionMessage } from "../session/types"
+import type { SessionMessage } from "@minicode/agent"
 import { ansi, markdownTheme } from "./theme"
 import { formatDuration } from "./projection"
 

@@ -1,7 +1,5 @@
-import type { Session } from "../session/session"
-import { trustProject } from "../config/trust"
-import type { Skill } from "../config/resources"
-import type { CompactionOutcome } from "../loop/compact"
+import type { CompactionOutcome, Session, Skill } from "@minicode/agent"
+import { trustProject } from "@minicode/agent"
 
 /**
  * Outcome of a manual `/compact`, including the case where no model is
@@ -14,7 +12,7 @@ export type CompactResult = CompactionOutcome | { readonly status: "no-model" }
 
 /** Facade the commands act through — implemented by the TUI app. */
 export interface CommandContext {
-  agent(): import("../minicode").MiniCode
+  agent(): import("@minicode/agent").MiniCode
   session(): Session
   /** Replaces the active session (resume/fork/clone/new) and replays it. */
   setSession(session: Session): void

@@ -71,7 +71,7 @@ x86_64 is the only platform with a prebuilt binary today.
 **Prerequisite:** [Bun](https://bun.sh) must be installed and available on PATH.
 
 ```sh
-npm install -g minicode
+npm install -g @minicode/cli
 cd ~/my-project
 minicode
 ```
@@ -88,7 +88,7 @@ cd minicode
 bun install
 
 # start MiniCode in your project
-bun ./packages/agent/src/tui/main.ts /path/to/your/project
+bun ./packages/cli/src/main.ts /path/to/your/project
 ```
 
 On first launch no model is configured. Use `/login` to set one up — MiniCode asks for the protocol (`openai` or `anthropic`), the endpoint, a provider model name, your API key, and token limits. The configuration is saved locally, and you can switch models later with `/model` or Ctrl+P.

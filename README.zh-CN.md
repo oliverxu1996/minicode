@@ -69,7 +69,7 @@ cd ~/my-project
 **前提条件：** [Bun](https://bun.sh) 必须已安装并在 PATH 中可用。
 
 ```sh
-npm install -g minicode
+npm install -g @minicode/cli
 cd ~/my-project
 minicode
 ```
@@ -86,7 +86,7 @@ cd minicode
 bun install
 
 # 在你的项目中启动 MiniCode
-bun ./packages/agent/src/tui/main.ts /path/to/your/project
+bun ./packages/cli/src/main.ts /path/to/your/project
 ```
 
 首次启动时没有配置任何模型。使用 `/login` 完成配置——MiniCode 会依次询问协议（`openai` 或 `anthropic`）、endpoint、提供商的模型名称、你的 API key 以及 token 上限。配置会保存在本地，之后可以随时用 `/model` 或 Ctrl+P 切换模型。

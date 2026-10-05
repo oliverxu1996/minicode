@@ -10,7 +10,7 @@ in an interactive terminal UI.
 [Bun](https://bun.sh) must be installed and available on PATH.
 
 ```sh
-npm install -g minicode
+npm install -g @minicode/cli
 cd my-project
 minicode
 ```

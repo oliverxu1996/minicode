@@ -6,7 +6,6 @@ import { loadSettings, projectSettingsPath, globalSettingsPath } from "./config/
 import { formatProjectInstructions, loadProjectContext } from "./config/context"
 import { loadResources } from "./config/resources"
 import { isProjectTrusted, trustProject as trustProjectFn } from "./config/trust"
-import { findCommand, COMMANDS } from "./tui/commands"
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "minicode-product-test-"))
@@ -125,16 +124,5 @@ describe("resources and project trust (AC13/AC17)", () => {
       else process.env.XDG_CONFIG_HOME = previous
       rmSync(dir, { recursive: true, force: true })
     }
-  })
-})
-
-describe("commands (AC12)", () => {
-  test("core commands exist with descriptions", () => {
-    const names = COMMANDS.map(c => c.name)
-    for (const name of ["help", "model", "login", "logout", "new", "resume", "name", "session", "compact", "copy", "export", "import", "trust", "reload", "fork", "clone", "tree", "hotkeys", "quit"]) {
-      expect(names).toContain(name)
-    }
-    expect(findCommand("model")?.description.length).toBeGreaterThan(0)
-    expect(findCommand("nonexistent")).toBeUndefined()
   })
 })

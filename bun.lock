@@ -14,12 +14,11 @@
       "version": "0.1.0",
       "dependencies": {
         "@minicode/model": "workspace:*",
-        "@minicode/tui": "workspace:*",
         "diff": "9.0.0",
       },
     },
     "packages/cli": {
-      "name": "minicode",
+      "name": "@minicode/cli",
       "version": "0.1.0",
       "bin": {
         "minicode": "dist/minicode.js",
@@ -32,6 +31,11 @@
         "get-east-asian-width": "1.6.0",
         "marked": "18.0.11",
         "zod": "4.6.5",
+      },
+      "devDependencies": {
+        "@minicode/agent": "workspace:*",
+        "@minicode/model": "workspace:*",
+        "@minicode/tui": "workspace:*",
       },
     },
     "packages/model": {
@@ -66,6 +70,8 @@
 
     "@minicode/agent": ["@minicode/agent@workspace:packages/agent"],
 
+    "@minicode/cli": ["@minicode/cli@workspace:packages/cli"],
+
     "@minicode/model": ["@minicode/model@workspace:packages/model"],
 
     "@minicode/tui": ["@minicode/tui@workspace:packages/tui"],
@@ -93,8 +99,6 @@
     "json-schema": ["json-schema@0.4.0", "", {}, "sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA=="],
 
     "marked": ["marked@18.0.11", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-HnslJfsZkRPBDJRHvVtAaWlZHEpSu7u8LgQuJCELjRKuWR+hpq4A7sLq3p8HaI9ypVoXDXxV34CsQJEe1+J5Aw=="],
-
-    "minicode": ["minicode@workspace:packages/cli"],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

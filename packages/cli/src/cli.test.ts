@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import cliManifest from "../../cli/package.json" with { type: "json" }
+import cliManifest from "../package.json" with { type: "json" }
 import { MINICODE_VERSION } from "./version"
-import { helpText, runCli, type CliIO } from "./tui/main"
+import { helpText, runCli, type CliIO } from "./main"
 
 interface Captured {
   readonly io: CliIO

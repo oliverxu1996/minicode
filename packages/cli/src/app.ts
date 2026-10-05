@@ -13,13 +13,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { ModelLimits } from "@minicode/model"
-import type { Session } from "../session/session"
-import type { RunEvent, SessionMessage } from "../session/types"
-import type { MiniCode } from "../minicode"
-import type { PromptTemplate, Skill } from "../config/resources"
-import { loadResources } from "../config/resources"
-import { loadSettings } from "../config/settings"
-import { isProjectTrusted } from "../config/trust"
+import type { MiniCode, RunEvent, Session, SessionMessage, Skill } from "@minicode/agent"
+import { isProjectTrusted, loadResources, loadSettings } from "@minicode/agent"
 import { ansi, markdownTheme } from "./theme"
 import {
 	NO_RUN_DISPLAY,
@@ -195,7 +190,7 @@ export class MiniCodeTui {
 			compact: async (): Promise<CompactResult> => {
 				const model = await this.options.agent.currentModel()
 				if (model === undefined) return { status: "no-model" }
-				const { Compactor } = await import("../loop/compact")
+				const { Compactor } = await import("@minicode/agent")
 				const compactor = new Compactor(model, model.limits.contextWindow)
 				const outcome = await compactor.compact(this.session)
 				if (outcome.status === "compacted") {

@@ -8,7 +8,6 @@
   },
   "dependencies": {
     "@minicode/model": "workspace:*",
-    "@minicode/tui": "workspace:*",
     "diff": "9.0.0"
   }
 }

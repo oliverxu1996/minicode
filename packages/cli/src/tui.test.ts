@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionMessage } from "./session/types"
-import { ToolExecutionComponent, replayMessage, toolArgumentSummary } from "./tui/components"
-import { findCommand, type CommandContext } from "./tui/commands"
+import type { SessionMessage } from "@minicode/agent"
+import { ToolExecutionComponent, replayMessage, toolArgumentSummary } from "./components"
+import { findCommand, type CommandContext } from "./commands"
 
 function render(component: { render(width: number): string[] }): string {
 	return component.render(100).join("\n")

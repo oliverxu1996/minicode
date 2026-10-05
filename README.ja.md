@@ -69,7 +69,7 @@ cd ~/my-project
 **前提条件:** [Bun](https://bun.sh) がインストール済みで PATH から利用できること。
 
 ```sh
-npm install -g minicode
+npm install -g @minicode/cli
 cd ~/my-project
 minicode
 ```
@@ -86,7 +86,7 @@ cd minicode
 bun install
 
 # プロジェクト内で MiniCode を起動
-bun ./packages/agent/src/tui/main.ts /path/to/your/project
+bun ./packages/cli/src/main.ts /path/to/your/project
 ```
 
 初回起動時はモデルが未設定です。`/login` で設定を行います——プロトコル（`openai` または `anthropic`）、エンドポイント、プロバイダのモデル名、API キー、トークン上限を順に尋ねられます。設定はローカルに保存され、後から `/model` や Ctrl+P で切り替えられます。
