@@ -122,7 +122,7 @@ export class Compactor {
       content: `[Compacted conversation summary]\n\n${summary}`,
     }
     const tail = messages.slice(preserved)
-    session.replaceMessages([summaryMessage, ...tail])
+    await session.replaceMessages([summaryMessage, ...tail])
     return {
       status: "compacted",
       removed: older.length,

@@ -281,7 +281,7 @@ export const COMMANDS: Command[] = [
         return
       }
       const session = ctx.agent().createSession(ctx.session().cwd)
-      session.replaceMessages(messages as import("@minicode/model").ModelMessage[])
+      await session.replaceMessages(messages as import("@minicode/model").ModelMessage[])
       ctx.setSession(session)
       ctx.notify(`imported ${messages.length} messages into session ${session.id.slice(0, 8)}`)
     },
@@ -329,7 +329,7 @@ export const COMMANDS: Command[] = [
       const cut = Number(chosen) + 1
       const forked = ctx.agent().createSession(session.cwd)
       forked.parentSessionId = session.id
-      forked.replaceMessages(session.messages.slice(0, cut).map(m => ({ role: m.role, content: m.content })) as import("@minicode/model").ModelMessage[])
+      await forked.replaceMessages(session.messages.slice(0, cut).map(m => ({ role: m.role, content: m.content })) as import("@minicode/model").ModelMessage[])
       ctx.setSession(forked)
       ctx.notify(`forked session ${forked.id.slice(0, 8)} from message #${cut}`)
     },
@@ -341,7 +341,7 @@ export const COMMANDS: Command[] = [
       const session = ctx.session()
       const clone = ctx.agent().createSession(session.cwd)
       clone.parentSessionId = session.id
-      clone.replaceMessages(session.messages.map(m => ({ role: m.role, content: m.content })) as import("@minicode/model").ModelMessage[])
+      await clone.replaceMessages(session.messages.map(m => ({ role: m.role, content: m.content })) as import("@minicode/model").ModelMessage[])
       ctx.setSession(clone)
       ctx.notify(`cloned into session ${clone.id.slice(0, 8)}`)
     },

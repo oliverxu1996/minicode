@@ -286,9 +286,24 @@ export class Session {
     )
   }
 
-  /** Replaces the whole history (used by compaction). The caller
-   *  checkpoints. */
-  replaceMessages(messages: ModelMessage[]): void {
+  /**
+   * Replaces the whole history and persists it.
+   *
+   * Every caller is a durable lifecycle change — compaction, import, fork,
+   * clone — where the mutation *means* "change the durable session". So the
+   * mutation owns its own durability, the way `setTitle` does, rather than
+   * leaving it to each caller to remember a `checkpoint()`. Requiring that
+   * step is what let `/fork`, `/clone`, `/import` and `/compact` return having
+   * changed only memory: the new session stayed invisible on disk until some
+   * later run happened to checkpoint, and was lost outright if the process
+   * exited first.
+   *
+   * This is deliberately NOT a general autosave: per-message appends during a
+   * run are ephemeral runtime state whose durability is the Run's business,
+   * ordered around its recovery contract. Only this wholesale rewrite — which
+   * no run path performs for durability reasons — persists itself.
+   */
+  async replaceMessages(messages: ModelMessage[]): Promise<void> {
     this.messages.length = 0
     for (const message of messages) {
       this.messages.push({
@@ -298,6 +313,7 @@ export class Session {
         timestamp: Date.now(),
       } as SessionMessage)
     }
+    await this.checkpoint()
   }
 
   /** Consume the pending recovery note (exactly the next model context). */
