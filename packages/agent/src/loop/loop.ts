@@ -130,8 +130,11 @@ export class AgentLoop {
     let systemPrompt: string | null = null
 
     let iterations = 0
-    let inputTokens = 0
-    let outputTokens = 0
+    // The last call's input size, used as the pressure signal for proactive
+    // compaction and for request pruning. The loop keeps no running token
+    // totals: a run's usage is owned by `RunSummary.usage`, summed from the
+    // event stream in `runTask`, and a second accumulator here could only
+    // diverge from it (it did, whenever a compaction call went uncounted).
     let lastInputTokens = 0
     let compactionRetries = 0
     let retryAttempt = 0
@@ -141,9 +144,9 @@ export class AgentLoop {
     while (true) {
       iterations++
       if (iterations > maxIterations) {
-        return { aborted: false, finishReason: "max-iterations", iterations, inputTokens, outputTokens }
+        return { aborted: false, finishReason: "max-iterations", iterations }
       }
-      if (signal?.aborted) return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
+      if (signal?.aborted) return { aborted: true, finishReason: "aborted", iterations }
 
       emit({ type: "iteration_start", iteration: iterations })
 
@@ -238,13 +241,13 @@ export class AgentLoop {
         // continuation below.
         if (steered === null) {
           if (signal?.aborted || (err instanceof ModelError && err.code === "cancelled")) {
-            return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
+            return { aborted: true, finishReason: "aborted", iterations }
           }
           // Provider-reported overflow: compact and retry the iteration —
           // bounded, so a pathological model cannot loop forever.
           if (err instanceof ModelError && err.code === "context_exceeded") {
             if (compactionRetries >= MAX_COMPACTION_RETRIES) {
-              return { aborted: false, finishReason: "error", iterations, inputTokens, outputTokens, error: err.message }
+              return { aborted: false, finishReason: "error", iterations, error: err.message }
             }
             compactionRetries += 1
             const outcome = await compactor.compact(this.session)
@@ -260,8 +263,6 @@ export class AgentLoop {
               aborted: false,
               finishReason: "error",
               iterations,
-              inputTokens,
-              outputTokens,
               error:
                 outcome.status === "failed"
                   ? `context overflow: compaction failed (${outcome.error})`
@@ -282,7 +283,7 @@ export class AgentLoop {
             })
             const abortedDuringWait = await abortableDelay(delayMs, signal)
             if (abortedDuringWait) {
-              return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
+              return { aborted: true, finishReason: "aborted", iterations }
             }
             iterations -= 1 // the retried attempt replaces this one
             continue
@@ -291,8 +292,6 @@ export class AgentLoop {
             aborted: false,
             finishReason: "error",
             iterations,
-            inputTokens,
-            outputTokens,
             error: err instanceof Error ? err.message : String(err),
           }
         }
@@ -314,10 +313,8 @@ export class AgentLoop {
       }
 
       if (usage?.inputTokens !== undefined) {
-        inputTokens += usage.inputTokens
         lastInputTokens = usage.inputTokens
       }
-      if (usage?.outputTokens !== undefined) outputTokens += usage.outputTokens
       const response: ModelResponse = {
         content,
         toolCalls,
@@ -327,7 +324,7 @@ export class AgentLoop {
 
       const assistantMsg = this.session.appendAssistant(
         assistantContentFrom(response) as ModelAssistantPart[],
-        { usage: response.usage, finishReason: response.finishReason },
+        { finishReason: response.finishReason },
       )
       retryAttempt = 0 // a successful call resets the retry streak
       emit({
@@ -343,12 +340,12 @@ export class AgentLoop {
         const runFinishReason = response.finishReason === "stop"
           ? "stop"
           : response.finishReason === "length" ? "length" : "unknown"
-        return { aborted: false, finishReason: runFinishReason, iterations, inputTokens, outputTokens }
+        return { aborted: false, finishReason: runFinishReason, iterations }
       }
 
       // Execute the requested calls sequentially, in provider order.
       for (const call of response.toolCalls) {
-        if (signal?.aborted) return { aborted: true, finishReason: "aborted", iterations, inputTokens, outputTokens }
+        if (signal?.aborted) return { aborted: true, finishReason: "aborted", iterations }
         await executeTool(this.session, this.tools, assistantMsg, call.toolName, call.toolCallId, call.input as Record<string, unknown>, {
           iteration: iterations,
           signal,
@@ -361,7 +358,7 @@ export class AgentLoop {
           recentCalls.length >= DOOM_LOOP_THRESHOLD &&
           recentCalls.slice(-DOOM_LOOP_THRESHOLD).every(k => k === key)
         ) {
-          return { aborted: false, finishReason: "doom-loop", iterations, inputTokens, outputTokens }
+          return { aborted: false, finishReason: "doom-loop", iterations }
         }
       }
 
@@ -377,8 +374,6 @@ export class AgentLoop {
             aborted: false,
             finishReason: "error",
             iterations,
-            inputTokens,
-            outputTokens,
             error:
               outcome.status === "failed"
                 ? `context overflow detected but compaction failed: ${outcome.error}`

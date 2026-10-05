@@ -164,7 +164,7 @@ export class Session {
   /** Appends a completed assistant turn built from a model response. */
   appendAssistant(
     content: ModelAssistantPart[],
-    meta: { usage?: ModelUsage; finishReason?: string },
+    meta: { finishReason?: string },
   ): SessionMessage & { role: "assistant" } {
     const msg: SessionMessage = {
       id: crypto.randomUUID(),
@@ -172,7 +172,6 @@ export class Session {
       content,
       status: "complete",
       timestamp: Date.now(),
-      usage: meta.usage,
       finishReason: meta.finishReason,
     }
     this.messages.push(msg)

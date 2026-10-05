@@ -39,8 +39,6 @@ export interface UserMessage extends BaseMessage {
 export interface AssistantMessage extends BaseMessage {
   readonly role: "assistant"
   readonly content: readonly ModelAssistantPart[]
-  /** Provider-reported usage of the model call that produced this message. */
-  usage?: ModelUsage
   /** Why the model stopped (or the runtime truncated: max-iterations, doom-loop). */
   finishReason?: string
 }
@@ -182,9 +180,11 @@ export type RunEvent =
       runId: string
       finishReason: RunFinishReason
       iterations: number
-      usage?: ModelUsage
       error?: string
       /** The completed run record — the same shape the session persists, so a
-       *  JSONL consumer and a snapshot reader agree without a mapping layer. */
+       *  JSONL consumer and a snapshot reader agree without a mapping layer.
+       *  `run.usage` is the run's one usage total; there is deliberately no
+       *  second `usage` field here, because a separate flat total could only
+       *  disagree with this one. */
       run: RunSummary
     }

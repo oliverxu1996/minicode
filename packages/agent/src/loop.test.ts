@@ -646,6 +646,94 @@ describe("Tool duration and per-run counts (O3)", () => {
   })
 })
 
+describe("token accounting ownership (Work 4)", () => {
+  const longTask = `filler ${"filler ".repeat(4000)} and do the thing`
+
+  test("a normal run records usage on the one authoritative holder", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      textResponse("done", { usage: { inputTokens: 300, outputTokens: 12 } }),
+    ]))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    await agent.run(session, "hello", { onEvent: e => events.push(e) })
+
+    expect(session.runs[0]!.usage).toEqual({ inputTokens: 300, outputTokens: 12 })
+    const end = events.find(e => e.type === "run_end")
+    if (end?.type !== "run_end") throw new Error("expected run_end")
+    expect(end.run.usage).toEqual({ inputTokens: 300, outputTokens: 12 })
+    // No second usage holder rides alongside the record.
+    expect("usage" in end).toBe(false)
+    cleanup()
+  })
+
+  // The adversarial case. The removed holder was the loop's own counter, which
+  // never saw a compaction call and therefore reported a smaller total than the
+  // record whenever one occurred. Now there is only the record.
+  test("a compacted run keeps one usage total, so nothing can diverge", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse(
+        [{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }],
+        { usage: { inputTokens: 900, outputTokens: 20 } }, // over the proactive threshold
+      ),
+      textResponse("summary of the conversation", { usage: { inputTokens: 50, outputTokens: 10 } }),
+      textResponse("finished after compaction", { usage: { inputTokens: 200, outputTokens: 5 } }),
+    ], { contextWindow: 1000, maxOutputTokens: 250 }))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    const result = await agent.run(session, longTask, { onEvent: e => events.push(e) })
+
+    expect(result.finishReason).toBe("stop")
+    // Compaction actually happened — this is not a counter-mutation fixture.
+    expect(events.filter(e => e.type === "compaction")).toHaveLength(1)
+
+    // 900 + 50 + 200 input, 20 + 10 + 5 output. The removed holder would have
+    // reported 1100/30 here, having omitted the summarization call entirely.
+    const authoritative = { inputTokens: 1150, outputTokens: 35 }
+    expect(session.runs[0]!.usage).toEqual(authoritative)
+
+    const end = events.find(e => e.type === "run_end")
+    if (end?.type !== "run_end") throw new Error("expected run_end")
+    expect(end.run.usage).toEqual(authoritative)
+    expect("usage" in end).toBe(false)
+    cleanup()
+  })
+
+  test("the persisted stream carries the same usage the record holds", async () => {
+    const { agent, dir, cleanup } = agentFor(new FakeModel([
+      toolCallResponse(
+        [{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }],
+        { usage: { inputTokens: 400, outputTokens: 15 } },
+      ),
+      textResponse("done", { usage: { inputTokens: 100, outputTokens: 9 } }),
+    ]))
+    const session = agent.createSession(dir)
+    const events: RunEvent[] = []
+
+    await agent.run(session, "count", { onEvent: e => events.push(e) })
+
+    // What a JSONL consumer does with these same events: add up what each call
+    // reported. A run's totals must be a projection of that, not a second
+    // independently maintained number.
+    const summed = events.reduce(
+      (acc, e) => {
+        const u = e.type === "model_response" || e.type === "compaction" ? e.usage : undefined
+        if (u === undefined) return acc
+        return {
+          inputTokens: acc.inputTokens + (u.inputTokens ?? 0),
+          outputTokens: acc.outputTokens + (u.outputTokens ?? 0),
+        }
+      },
+      { inputTokens: 0, outputTokens: 0 },
+    )
+
+    expect(session.runs[0]!.usage).toEqual(summed)
+    expect(session.runs[0]!.usage).toEqual({ inputTokens: 500, outputTokens: 24 })
+    cleanup()
+  })
+})
+
 describe("context-management observability (O4)", () => {
   /** A task large enough that compaction finds a region to summarize. */
   const longTask = `filler ${"filler ".repeat(4000)} and do the thing`

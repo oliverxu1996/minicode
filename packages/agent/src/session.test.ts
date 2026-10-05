@@ -214,35 +214,34 @@ describe("Usage detail persistence (O1)", () => {
     const session = agent.createSession(join(tempDir().dir, "ws"))
     await session.checkpoint()
 
-    // The provider-reported breakdown, as the model layer carries it.
-    session.appendAssistant(
-      [{ type: "text", text: "done" }],
-      {
-        usage: {
-          inputTokens: 1050,
-          outputTokens: 20,
-          totalTokens: 1070,
-          cacheReadTokens: 900,
-          cacheWriteTokens: 50,
-          reasoningTokens: 7,
-        },
-        finishReason: "stop",
-      },
-    )
-
-    // Through a fresh runtime root, as a restarted process would read it.
-    const persisted = await reloadAsNewProcess(session)
-    const assistant = persisted.messages.find(message => message.role === "assistant")
-    if (assistant?.role !== "assistant") throw new Error("expected an assistant message")
-
-    expect(assistant.usage).toEqual({
+    // The provider-reported breakdown, as the model layer carries it, recorded
+    // on the run — the one authoritative holder for a run's usage.
+    const providerUsage = {
       inputTokens: 1050,
       outputTokens: 20,
       totalTokens: 1070,
       cacheReadTokens: 900,
       cacheWriteTokens: 50,
       reasoningTokens: 7,
+    }
+    session.runs.push({
+      id: "run-1",
+      startedAt: 1,
+      model: {
+        id: "m1",
+        name: "model one",
+        protocol: "openai",
+        model: "gpt",
+        contextWindow: 128_000,
+        maxOutputTokens: 8_192,
+      },
+      usage: providerUsage,
     })
+    await session.checkpoint()
+
+    // Through a fresh runtime root, as a restarted process would read it.
+    const persisted = await reloadAsNewProcess(session)
+    expect(persisted.runs[0]?.usage).toEqual(providerUsage)
     cleanup()
   })
 })

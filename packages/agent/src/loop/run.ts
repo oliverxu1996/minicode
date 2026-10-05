@@ -38,12 +38,16 @@ export interface RunDeps {
   onEvent?: (event: RunEvent) => void
 }
 
+/**
+ * How a run ended. Deliberately carries no token counts: a run's usage is
+ * `RunSummary.usage` on `session.runs`, the one authoritative record. A second
+ * total here could only diverge from it — and did, because the loop's counters
+ * never saw compaction calls.
+ */
 export interface RunResult {
   aborted: boolean
   finishReason: RunFinishReason
   iterations: number
-  inputTokens?: number
-  outputTokens?: number
   error?: string
 }
 
@@ -144,15 +148,11 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
   } catch {
     // Terminal persistence failure must not mask the run outcome.
   }
-  const legacyUsage = result.inputTokens !== undefined || result.outputTokens !== undefined
-    ? { inputTokens: result.inputTokens, outputTokens: result.outputTokens }
-    : undefined
   emit({
     type: "run_end",
     runId,
     finishReason: result.finishReason,
     iterations: result.iterations,
-    usage: legacyUsage,
     error: result.error,
     run: finished,
   })
