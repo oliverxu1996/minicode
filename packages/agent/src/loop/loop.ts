@@ -108,19 +108,30 @@ export class AgentLoop {
     this.session.pushUser(task)
     await this.session.checkpoint()
 
-    // Reconcile an interrupted run before the model is invoked; its note
-    // reaches exactly the next model context.
-    const recovery = await this.session.recover({
-      tools: this.tools,
-      executeTool: (session, msg, name, toolCallId, input, o) =>
-        executeTool(session, this.tools, msg, name, toolCallId, input, {
-          iteration: 0,
-          reissue: o?.reissue,
-          signal: opts.signal,
-          onEvent: emit,
-        }),
-    })
-    if (recovery.recovered) emit({ type: "recovery", note: recovery.note })
+    // Reconcile recoverable execution state before a model request. This is
+    // the request boundary, invoked immediately before every `model.stream`,
+    // not merely once at run start: state can be created mid-run (a steering
+    // interruption captures a tool call before it has run), and the next
+    // request must not carry an unresolved execution boundary. `recover` is
+    // idempotent and a no-op when nothing is actionable, so a request with
+    // nothing to reconcile gains no event, note, or durable mutation.
+    const reconcileBeforeRequest = async (): Promise<void> => {
+      const recovery = await this.session.recover({
+        tools: this.tools,
+        executeTool: (session, msg, name, toolCallId, input, o) =>
+          executeTool(session, this.tools, msg, name, toolCallId, input, {
+            iteration: 0,
+            reissue: o?.reissue,
+            signal: opts.signal,
+            onEvent: emit,
+          }),
+      })
+      if (recovery.recovered) emit({ type: "recovery", note: recovery.note })
+    }
+
+    // Reconcile an interrupted run before the loop begins; its note reaches
+    // exactly the first model context.
+    await reconcileBeforeRequest()
 
     const budget = contextBudget(this.model.limits)
     const compactor = new Compactor(this.model, this.model.limits.contextWindow)
@@ -180,6 +191,10 @@ export class AgentLoop {
       let finishReason: ModelFinishReason = "unknown"
       let steered: string | null = null
       try {
+        // The request boundary: reconcile immediately before this request is
+        // constructed, so no model request carries an unresolved execution
+        // boundary. Runs on every iteration, including the one after steering.
+        await reconcileBeforeRequest()
         if (systemPrompt === null) {
           systemPrompt = buildSystemPrompt(this.session, {
             projectInstructions: opts.projectInstructions ?? null,
