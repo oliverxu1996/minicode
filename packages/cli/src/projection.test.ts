@@ -222,7 +222,7 @@ describe("the run summary renders the record as given", () => {
 
 describe("tool duration comes from the runtime", () => {
   test("a reported duration renders on the tool line", async () => {
-    const { ToolExecutionComponent } = await import("./components")
+    const { ToolExecutionComponent } = await import("./interactive/view/components")
     const withDuration = new ToolExecutionComponent("c1", "bash", { command: "true" })
     withDuration.setResult(true, "ok", 1250)
     expect(withDuration.render(200).join("\n")).toContain("1.3s")
@@ -234,7 +234,7 @@ describe("tool duration comes from the runtime", () => {
   })
 
   test("sub-second durations read in milliseconds", async () => {
-    const { ToolExecutionComponent } = await import("./components")
+    const { ToolExecutionComponent } = await import("./interactive/view/components")
     const tool = new ToolExecutionComponent("c1", "ls", { path: "." })
     tool.setResult(true, "ok", 4)
     expect(tool.render(200).join("\n")).toContain("4ms")

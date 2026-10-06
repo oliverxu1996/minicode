@@ -15,7 +15,7 @@ import { join } from "node:path"
 import type { ModelLimits } from "@minicode/model"
 import type { MiniCode, RunEvent, Session, SessionMessage, Skill } from "@minicode/agent"
 import { isProjectTrusted, loadResources, loadSettings } from "@minicode/agent"
-import { ansi, markdownTheme } from "./theme"
+import { ansi, markdownTheme } from "./view/theme"
 import {
 	NO_RUN_DISPLAY,
 	compactionNoticeText,
@@ -24,10 +24,10 @@ import {
 	runSummaryLines,
 	type FooterSegment,
 	type RunDisplay,
-} from "./projection"
-import { Selector, type SelectorItem } from "./selector"
-import { MiniCodeAutocomplete } from "./autocomplete"
-import { expandFileReferences } from "./expand"
+} from "../projection"
+import { Selector, type SelectorItem } from "./view/selector"
+import { MiniCodeAutocomplete } from "./input/autocomplete"
+import { expandFileReferences } from "./input/expand"
 import { COMMANDS, findCommand, type CommandContext, type CompactResult } from "./commands"
 import {
 	ToolExecutionComponent,
@@ -36,7 +36,7 @@ import {
 	notice,
 	replayMessage,
 	userMessage,
-} from "./components"
+} from "./view/components"
 
 
 

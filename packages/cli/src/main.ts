@@ -1,6 +1,6 @@
 import { MiniCode } from "@minicode/agent"
 import { MINICODE_VERSION } from "./version"
-import { MiniCodeTui } from "./app"
+import { MiniCodeTui } from "./interactive/app"
 import { runPrint } from "./print"
 
 /**

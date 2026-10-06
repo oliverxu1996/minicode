@@ -1,7 +1,7 @@
 import { Box, Container, Markdown, Spacer, Text, type Component } from "@minicode/tui"
 import type { SessionMessage } from "@minicode/agent"
 import { ansi, markdownTheme } from "./theme"
-import { formatDuration } from "./projection"
+import { formatDuration } from "../../projection"
 
 /**
  * MiniCode chat components for the runtime's message model.
