@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { ModelError } from "@minicode/model"
-import { Compactor } from "./loop/compact"
+import { Compactor } from "./context/compaction"
 import { Session } from "./session/session"
 import { FakeModel, textResponse } from "./testing"
 

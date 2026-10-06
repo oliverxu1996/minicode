@@ -1,5 +1,5 @@
 import type { Model, ModelUsage } from "@minicode/model"
-import type { PruneStats } from "../session/prune"
+import type { PruneStats } from "../context/projection"
 import type { Session } from "../session/session"
 import type {
   ModelIdentity,

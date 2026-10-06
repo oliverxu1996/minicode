@@ -13,7 +13,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { ModelMessage } from "@minicode/model"
-import { Compactor } from "./loop/compact"
+import { Compactor } from "./context/compaction"
 import { ToolLedger, toolDurationMs } from "./session/ledger"
 import { Session } from "./session/session"
 import type { SessionMessage } from "./session/types"

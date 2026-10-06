@@ -5,7 +5,7 @@ import type {
   ModelToolResult,
   ModelUsage,
 } from "@minicode/model"
-import type { PruneStats } from "./prune"
+import type { PruneStats } from "../context/projection"
 import type { ToolAffordances } from "../tools/types"
 
 /**

@@ -1,5 +1,5 @@
 import type { Model, ModelMessage, ModelUsage } from "@minicode/model"
-import { contextBudget, estimateTokens } from "../context-budget"
+import { contextBudget, estimateTokens } from "./budget"
 import type { Session } from "../session/session"
 import type { SessionMessage } from "../session/types"
 

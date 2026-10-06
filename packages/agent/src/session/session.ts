@@ -1,8 +1,8 @@
 import type { ModelAssistantPart, ModelMessage, ModelToolResult, ModelUsage } from "@minicode/model"
 import type { ModelIdentity, RunFinishReason, RunSummary, SessionMessage, SessionStatus } from "./types"
 import { ToolLedger } from "./ledger"
-import { pruneOldToolOutputs } from "./prune"
-import type { PruneContext, PruneStats, ProjectionMessage } from "./prune"
+import { pruneOldToolOutputs } from "../context/projection"
+import type { PruneContext, PruneStats, ProjectionMessage } from "../context/projection"
 import type { ToolAffordances } from "../tools/types"
 
 /** Error text for tool calls whose outcome is unknown after an

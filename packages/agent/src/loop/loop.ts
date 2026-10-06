@@ -8,15 +8,15 @@ import type {
 } from "@minicode/model"
 import { ModelError } from "@minicode/model"
 import type { Skill } from "../config/resources"
-import { contextBudget } from "../context-budget"
-import type { PruneStats } from "../session/prune"
+import { contextBudget } from "../context/budget"
+import type { PruneStats } from "../context/projection"
 import type { Session } from "../session/session"
 import type { RunEvent } from "../session/types"
 import { toModelTools, type Tool } from "../tools"
-import { Compactor } from "./compact"
+import { Compactor } from "../context/compaction"
 import { assistantContentFrom, executeTool } from "./execute"
 import type { RunResult } from "./run"
-import { buildSystemPrompt } from "./system-prompt"
+import { buildSystemPrompt } from "../context/prompt"
 
 export interface LoopOptions {
   signal?: AbortSignal

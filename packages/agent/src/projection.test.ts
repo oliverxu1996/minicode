@@ -3,13 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ModelMessage } from "@minicode/model"
-import { estimateTokens } from "./context-budget"
+import { estimateTokens } from "./context/budget"
 import {
   pruneOldToolOutputs,
   isPrunedToolOutput,
   type ProjectionMessage,
   type PruneStats,
-} from "./session/prune"
+} from "./context/projection"
 import { Session } from "./session/session"
 import { truncateOutput } from "./tools/truncate"
 import type { ToolAffordances } from "./tools/types"

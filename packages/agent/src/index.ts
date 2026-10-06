@@ -7,8 +7,8 @@
  * application composes. Tools and the loop are internal details of `run()`.
  */
 
-export { contextBudget } from "./context-budget"
-export type { ContextBudget } from "./context-budget"
+export { contextBudget } from "./context/budget"
+export type { ContextBudget } from "./context/budget"
 export { MiniCode } from "./minicode"
 export type { MiniCodeOptions, RunResult } from "./minicode"
 export { Session, UNKNOWN_OUTCOME_ERROR, type RecoveryReport } from "./session/session"
@@ -26,7 +26,7 @@ export type {
   ToolMessage,
   UserMessage,
 } from "./session/types"
-export { Compactor, type CompactionOutcome } from "./loop/compact"
+export { Compactor, type CompactionOutcome } from "./context/compaction"
 export { loadSettings } from "./config/settings"
 export { loadResources, type PromptTemplate, type Skill } from "./config/resources"
 export { isProjectTrusted, trustProject } from "./config/trust"

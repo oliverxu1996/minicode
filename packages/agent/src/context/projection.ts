@@ -1,5 +1,5 @@
 import type { ModelMessage, ModelToolOutput, ModelToolResult } from "@minicode/model"
-import { estimateTokens } from "../context-budget"
+import { estimateTokens } from "./budget"
 import type { ToolAffordances } from "../tools/types"
 
 /**

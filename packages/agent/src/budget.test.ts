@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { contextBudget } from "./context-budget"
+import { contextBudget } from "./context/budget"
 
 describe("contextBudget (75/25 policy, Runtime-owned)", () => {
   test("128000 context window splits into 96000 input / 32000 output", () => {

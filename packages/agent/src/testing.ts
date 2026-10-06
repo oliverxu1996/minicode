@@ -6,7 +6,7 @@ import type {
   ModelResponse,
   ModelToolCall,
 } from "@minicode/model"
-import { estimateTokens } from "./context-budget"
+import { estimateTokens } from "./context/budget"
 
 export type ScriptedResponse =
   | ModelResponse
