@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Model } from "@minicode/model"
+import type { ModelIdentity } from "./session/types"
 import { MiniCode } from "./minicode"
 import { Session, UNKNOWN_OUTCOME_ERROR } from "./session/session"
 import { SessionStore } from "./session/store"
@@ -10,6 +11,16 @@ import { ToolLedger, toolDurationMs } from "./session/ledger"
 import { CODING_TOOLS } from "./tools"
 import { executeTool } from "./loop/execute"
 import { FakeModel, textResponse } from "./testing"
+
+/** A model identity for runs a test starts directly (crash simulation). */
+const RUN_MODEL: ModelIdentity = {
+  id: "test-model",
+  name: "Test Model",
+  protocol: "openai",
+  model: "test-model",
+  contextWindow: 128_000,
+  maxOutputTokens: 8_192,
+}
 
 function tempDir(): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "minicode-session-test-"))
@@ -90,7 +101,7 @@ describe("Crash recovery (V2, AC6/AC7)", () => {
     session.ledger.pending({ toolCallId: "call_1", name: "write", input: { filePath: "recovered.txt", content: "data" } })
     await session.checkpoint()
 
-    session.status = "running" // crash mid-run: persisted before execution
+    await session.beginRun(RUN_MODEL) // crash mid-run: beginRun persists 'running'
     const persisted = await reloadAsNewProcess(session)
     expect(persisted.needsRecovery()).toBe(true)
     expect(persisted.status).toBe("interrupted")
@@ -118,7 +129,7 @@ describe("Crash recovery (V2, AC6/AC7)", () => {
     session.ledger.pending({ toolCallId: "call_1", name: "edit", input: { filePath: "x.ts" } })
     session.ledger.running("call_1")
 
-    session.status = "running" // crash mid-run: persisted before execution
+    await session.beginRun(RUN_MODEL) // crash mid-run: beginRun persists 'running'
     const persisted = await reloadAsNewProcess(session)
     await persisted.recover({ tools: CODING_TOOLS })
 
@@ -150,7 +161,7 @@ describe("Crash recovery (V2, AC6/AC7)", () => {
     session.ledger.pending({ toolCallId: "call_1", name: "read", input: { filePath: "known.txt" } })
     session.ledger.running("call_1")
 
-    session.status = "running" // crash mid-run: persisted before execution
+    await session.beginRun(RUN_MODEL) // crash mid-run: beginRun persists 'running'
     const persisted = await reloadAsNewProcess(session)
     await persisted.recover({
       tools: CODING_TOOLS,
@@ -175,7 +186,7 @@ describe("Crash recovery (V2, AC6/AC7)", () => {
       [{ type: "tool_call", toolCallId: "call_1", toolName: "bash", input: { command: "echo x" } }],
       { finishReason: "tool_call" },
     )
-    session.status = "running" // crash mid-run: persisted before execution
+    await session.beginRun(RUN_MODEL) // crash mid-run: beginRun persists 'running'
     const persisted = await reloadAsNewProcess(session)
     await persisted.recover({ tools: CODING_TOOLS })
 
@@ -224,20 +235,24 @@ describe("Usage detail persistence (O1)", () => {
       cacheWriteTokens: 50,
       reasoningTokens: 7,
     }
-    session.runs.push({
-      id: "run-1",
-      startedAt: 1,
-      model: {
-        id: "m1",
-        name: "model one",
-        protocol: "openai",
-        model: "gpt",
-        contextWindow: 128_000,
-        maxOutputTokens: 8_192,
-      },
-      usage: providerUsage,
+    // Record the provider breakdown through the real run lifecycle, so this
+    // tests the durable path a run actually uses rather than mutating the
+    // record collection directly.
+    const started = await session.beginRun({
+      id: "m1",
+      name: "model one",
+      protocol: "openai",
+      model: "gpt",
+      contextWindow: 128_000,
+      maxOutputTokens: 8_192,
     })
-    await session.checkpoint()
+    await session.finishRun(started.id, {
+      aborted: false,
+      finishReason: "stop",
+      usage: providerUsage,
+      modelCalls: 1,
+      toolCalls: 0,
+    })
 
     // Through a fresh runtime root, as a restarted process would read it.
     const persisted = await reloadAsNewProcess(session)
@@ -390,7 +405,7 @@ describe("Tool duration (O3)", () => {
     session.ledger.pending({ toolCallId: "call_1", name: "edit", input: { filePath: "x.ts" } })
     session.ledger.running("call_1", { startedAt: 1_000 })
 
-    session.status = "running" // crash mid-run, after the tool started
+    await session.beginRun(RUN_MODEL) // crash mid-run, after the tool started
     const persisted = await reloadAsNewProcess(session)
     await persisted.recover({ tools: CODING_TOOLS })
 
@@ -433,6 +448,174 @@ describe("Run record migration (O2)", () => {
     })
     expect(session.runs).toHaveLength(1)
     expect(session.runs[0]!.id).toBe("run-1")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Run lifecycle ownership — the Session is the only owner of run lifecycle
+// state. These pin the invariants that direct field writes only ever held by
+// convention (single-active-run, terminal immutability, stale/double finish).
+// ---------------------------------------------------------------------------
+
+describe("Run lifecycle ownership", () => {
+  test("beginRun establishes the active run, record and running status durably", async () => {
+    const { agent, reloadAsNewProcess, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+
+    const started = await session.beginRun(RUN_MODEL)
+
+    expect(session.status).toBe("running")
+    expect(session.runs).toHaveLength(1)
+    expect(session.runs[0]!.id).toBe(started.id)
+    expect(session.runs[0]!.model).toEqual(RUN_MODEL)
+    // Only the facts known at start; no terminal fact is fabricated.
+    expect(session.runs[0]).not.toHaveProperty("finishedAt")
+    expect(session.runs[0]).not.toHaveProperty("finishReason")
+
+    // Durable as 'running' before execution; a fresh process reads it as
+    // 'interrupted' (existing recovery semantics, unchanged).
+    const reloaded = await reloadAsNewProcess(session)
+    expect(reloaded.status).toBe("interrupted")
+    expect(reloaded.runs[0]!.id).toBe(started.id)
+    cleanup()
+  })
+
+  test("a second beginRun while a run is active is rejected (AC2)", async () => {
+    const { agent, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+
+    const first = await session.beginRun(RUN_MODEL)
+    await expect(session.beginRun(RUN_MODEL)).rejects.toThrow(/already active/)
+
+    // The original run remains authoritative; nothing was appended.
+    expect(session.status).toBe("running")
+    expect(session.runs).toHaveLength(1)
+    expect(session.runs[0]!.id).toBe(first.id)
+    cleanup()
+  })
+
+  test("finishRun records the terminal outcome, returns to idle, and persists (AC5/AC6)", async () => {
+    const { agent, reloadAsNewProcess, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+
+    const started = await session.beginRun(RUN_MODEL)
+    const finished = await session.finishRun(started.id, {
+      aborted: false,
+      finishReason: "stop",
+      usage: { inputTokens: 5, outputTokens: 3 },
+      modelCalls: 2,
+      toolCalls: 1,
+    })
+
+    expect(session.status).toBe("idle")
+    expect(finished.id).toBe(started.id)
+    expect(finished.startedAt).toBe(started.startedAt)
+    expect(finished.finishReason).toBe("stop")
+    expect(finished.usage).toEqual({ inputTokens: 5, outputTokens: 3 })
+    expect(finished.modelCalls).toBe(2)
+    expect(finished.toolCalls).toBe(1)
+    expect(finished.finishedAt).toEqual(expect.any(Number))
+
+    const reloaded = await reloadAsNewProcess(session)
+    expect(reloaded.runs).toEqual([finished])
+    expect(reloaded.status).toBe("idle")
+    cleanup()
+  })
+
+  test("an aborted run leaves interrupted, matching the recovery contract", async () => {
+    const { agent, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+
+    const started = await session.beginRun(RUN_MODEL)
+    await session.finishRun(started.id, {
+      aborted: true,
+      finishReason: "aborted",
+      usage: {},
+      modelCalls: 0,
+      toolCalls: 0,
+    })
+
+    expect(session.status).toBe("interrupted")
+    cleanup()
+  })
+
+  test("a non-active run identity cannot finalize (AC3)", async () => {
+    const { agent, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+
+    const a = await session.beginRun(RUN_MODEL)
+    await session.finishRun(a.id, {
+      aborted: false,
+      finishReason: "stop",
+      usage: {},
+      modelCalls: 0,
+      toolCalls: 0,
+    })
+    const b = await session.beginRun(RUN_MODEL)
+
+    await expect(
+      session.finishRun(a.id, { aborted: false, finishReason: "error", usage: {}, modelCalls: 0, toolCalls: 0 }),
+    ).rejects.toThrow(/not the active run/)
+
+    // B is untouched: still active, still unfinished.
+    expect(session.status).toBe("running")
+    expect(session.runs.find(r => r.id === b.id)?.finishedAt).toBeUndefined()
+    cleanup()
+  })
+
+  test("an unknown run identity cannot finalize (AC3)", async () => {
+    const { agent, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+    await session.beginRun(RUN_MODEL)
+
+    await expect(
+      session.finishRun("does-not-exist", { aborted: false, finishReason: "stop", usage: {}, modelCalls: 0, toolCalls: 0 }),
+    ).rejects.toThrow(/not the active run/)
+    expect(session.status).toBe("running")
+    cleanup()
+  })
+
+  test("finishing twice cannot overwrite the terminal record (AC4)", async () => {
+    const { agent, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+
+    const a = await session.beginRun(RUN_MODEL)
+    const first = await session.finishRun(a.id, {
+      aborted: false,
+      finishReason: "stop",
+      usage: { inputTokens: 1 },
+      modelCalls: 1,
+      toolCalls: 0,
+    })
+
+    await expect(
+      session.finishRun(a.id, {
+        aborted: false,
+        finishReason: "error",
+        usage: { inputTokens: 999 },
+        modelCalls: 9,
+        toolCalls: 9,
+      }),
+    ).rejects.toThrow(/not the active run/)
+
+    expect(session.runs.find(r => r.id === a.id)).toEqual(first)
+    expect(session.status).toBe("idle")
+    cleanup()
+  })
+
+  test("a session can begin a new run after an aborted one", async () => {
+    const { agent, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+
+    const a = await session.beginRun(RUN_MODEL)
+    await session.finishRun(a.id, { aborted: true, finishReason: "aborted", usage: {}, modelCalls: 0, toolCalls: 0 })
+    expect(session.status).toBe("interrupted")
+
+    const b = await session.beginRun(RUN_MODEL)
+    expect(session.status).toBe("running")
+    expect(session.runs).toHaveLength(2)
+    expect(session.runs[1]!.id).toBe(b.id)
+    cleanup()
   })
 })
 

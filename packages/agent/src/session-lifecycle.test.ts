@@ -113,8 +113,16 @@ describe("run recovery ordering is unchanged (Work 3)", () => {
     const f = fixture()
     const session = f.agent.createSession(f.dir)
 
-    // Leave an in-flight invocation behind exactly as an interruption would.
-    session.status = "running"
+    // Leave an in-flight invocation behind exactly as an interruption would:
+    // a run began (persisting 'running') but never finished.
+    await session.beginRun({
+      id: "test-model",
+      name: "Test Model",
+      protocol: "openai",
+      model: "test-model",
+      contextWindow: 128_000,
+      maxOutputTokens: 8_192,
+    })
     session.ledger.pending({ toolCallId: "c1", name: "bash", input: { command: "echo hi" } })
     await session.checkpoint()
 

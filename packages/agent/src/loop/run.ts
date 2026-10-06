@@ -5,7 +5,6 @@ import type {
   ModelIdentity,
   RunEvent,
   RunFinishReason,
-  RunSummary,
   SessionMessage,
 } from "../session/types"
 import { CODING_TOOLS } from "../tools"
@@ -58,14 +57,14 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
   const { session, model, task } = deps
   const callerOnEvent = deps.onEvent
 
-  // This run's record. Only the facts known before it starts are written now;
-  // every terminal fact stays absent until the run actually ends, so a run
-  // that crashes or is interrupted keeps an honest record of what was known.
-  const runId = crypto.randomUUID()
-  const startedAt = Date.now()
   const identity = modelIdentity(model)
-  const started: RunSummary = { id: runId, startedAt, model: identity }
-  session.runs.push(started)
+  // The session owns the run lifecycle. `beginRun` establishes the run
+  // identity, appends the initial record (only the facts known before the run
+  // starts — every terminal fact stays absent until it ends), moves the session
+  // to 'running', and checkpoints, so this layer never writes `session.status`
+  // or `session.runs` directly.
+  const started = await session.beginRun(identity)
+  const runId = started.id
 
   // Counted from the run's own event stream rather than from loop internals,
   // so the record and what an external JSONL consumer reads cannot disagree:
@@ -100,10 +99,9 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
     }
   }
 
-  // Persist 'running' BEFORE execution: a crash mid-run leaves 'running'
-  // on disk for recovery to reconcile, alongside this run's partial record.
-  session.status = "running"
-  await session.checkpoint()
+  // `beginRun` already persisted 'running' and the partial record BEFORE
+  // execution, so a crash mid-run leaves 'running' on disk for recovery to
+  // reconcile.
   emit({ type: "run_start", sessionId: session.id, runId, task, model: identity })
 
   let result: RunResult
@@ -126,26 +124,20 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
     }
   }
 
-  // Terminal transitions: an aborted run leaves 'interrupted' for the next
-  // process; a completed (even failed) run is idle.
-  session.status = result.aborted ? "interrupted" : "idle"
-  const finished: RunSummary = {
-    ...started,
-    finishedAt: Date.now(),
+  // Terminal transitions are session-owned: an aborted run leaves
+  // 'interrupted' for the next process; a completed (even failed) run is idle.
+  // `finishRun` writes the terminal record, transitions the state, and
+  // checkpoints (swallowing terminal persistence failure so it cannot mask the
+  // outcome) — this layer supplies only the outcome.
+  const finished = await session.finishRun(runId, {
+    aborted: result.aborted,
     finishReason: result.finishReason,
     usage,
     modelCalls,
     toolCalls,
     ...(pruning === undefined ? {} : { pruning }),
     ...(result.error === undefined ? {} : { error: result.error }),
-  }
-  const index = session.runs.findIndex(run => run.id === runId)
-  if (index !== -1) session.runs[index] = finished
-  try {
-    await session.checkpoint()
-  } catch {
-    // Terminal persistence failure must not mask the run outcome.
-  }
+  })
   emit({
     type: "run_end",
     runId,

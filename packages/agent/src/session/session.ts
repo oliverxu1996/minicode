@@ -1,8 +1,8 @@
 import type { ModelAssistantPart, ModelMessage, ModelToolResult, ModelUsage } from "@minicode/model"
-import type { ModelIdentity, RunSummary, SessionMessage, SessionStatus } from "./types"
+import type { ModelIdentity, RunFinishReason, RunSummary, SessionMessage, SessionStatus } from "./types"
 import { ToolLedger } from "./ledger"
 import { pruneOldToolOutputs } from "./prune"
-import type { PruneContext, ProjectionMessage } from "./prune"
+import type { PruneContext, PruneStats, ProjectionMessage } from "./prune"
 import type { ToolAffordances } from "../tools/types"
 
 /** Error text for tool calls whose outcome is unknown after an
@@ -39,6 +39,27 @@ export interface RecoverHooks {
 const EMPTY_REPORT: RecoveryReport = { recovered: false, reissued: [], unknownOutcome: [], note: "" }
 
 /**
+ * The terminal facts of one run, supplied to {@link Session.finishRun}.
+ *
+ * Mirrors `RunSummary`'s terminal fields exactly: every field the run engine
+ * always produces is required, and the two that stay absent when they do not
+ * apply (`pruning`, `error`) are optional, so the persisted record is
+ * byte-identical to the one the engine used to write directly.
+ */
+export interface RunOutcome {
+  /** True when the run ended because its signal aborted. */
+  readonly aborted: boolean
+  readonly finishReason: RunFinishReason
+  readonly usage: ModelUsage
+  readonly modelCalls: number
+  readonly toolCalls: number
+  /** Absent when the run never pruned anything. */
+  readonly pruning?: PruneStats
+  /** Present only when the run ended in an error. */
+  readonly error?: string
+}
+
+/**
  * Durable coding-task session: the canonical message history, the tool
  * ledger, and the run status.
  *
@@ -51,15 +72,26 @@ export class Session {
   readonly id: string
   readonly cwd: string
   readonly createdAt: number
-  status: SessionStatus = "idle"
+  /** Session lifecycle state, owned by `beginRun`/`finishRun`. Read-only. */
+  private _status: SessionStatus = "idle"
+  /** The lifecycle state: `running` iff a run began and has not finished. */
+  get status(): SessionStatus {
+    return this._status
+  }
   updatedAt: number
   readonly messages: SessionMessage[] = []
   /**
    * Every run this session has executed, oldest first. A run is appended when
    * it starts and replaced with its completed form when it ends, so a run
    * interrupted by a crash keeps a record of what was known before it died.
+   *
+   * Owned by `beginRun`/`finishRun`; the array is exposed read-only so no
+   * caller can append or overwrite a record behind the lifecycle.
    */
-  readonly runs: RunSummary[] = []
+  private readonly _runs: RunSummary[] = []
+  get runs(): readonly RunSummary[] {
+    return this._runs
+  }
   /** User-visible session name (set via /name). */
   title: string | null = null
   /** Set when this session was forked/cloned from another session. */
@@ -69,6 +101,16 @@ export class Session {
   get ledger(): ToolLedger {
     return this._ledger
   }
+
+  /**
+   * The identity of the active run, or null when none is active.
+   *
+   * In-memory only: a fresh process never has an active run (a persisted
+   * `running` status is a crash artifact, not a live run), so this is not
+   * serialized. It is the token that makes `finishRun` reject a stale or
+   * double finalization.
+   */
+  private activeRunId: string | null = null
 
   private checkpointSink: (() => Promise<void>) | null = null
   private _needsRecovery = false
@@ -96,21 +138,21 @@ export class Session {
       createdAt: typeof json.createdAt === "number" ? json.createdAt : undefined,
     })
     const persisted = json.status
-    session.status = persisted === "running" || persisted === "interrupted" || persisted === "idle"
+    session._status = persisted === "running" || persisted === "interrupted" || persisted === "idle"
       ? persisted
       : "idle"
     session.updatedAt = typeof json.updatedAt === "number" ? json.updatedAt : 0
     if (typeof json.title === "string" && json.title.trim().length > 0) session.title = json.title
     if (typeof json.parentSessionId === "string") session.parentSessionId = json.parentSessionId
     session.messages.push(...parseMessages(json.messages))
-    session.runs.push(...parseRuns(json.runs))
+    session._runs.push(...parseRuns(json.runs))
     session.ledger.replaceAll(ToolLedger.fromJSON(json.ledger as never))
 
     // A persisted 'running' status in a fresh process is always a crash
     // artifact: no run of ours is executing it anymore.
-    if (session.status === "running") session.status = "interrupted"
+    if (session._status === "running") session._status = "interrupted"
     session._needsRecovery =
-      session.status === "interrupted"
+      session._status === "interrupted"
       || session.ledger.hasUnfinished()
     return session
   }
@@ -120,12 +162,12 @@ export class Session {
       version: 1,
       id: this.id,
       cwd: this.cwd,
-      status: this.status,
+      status: this._status,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
       title: this.title,
       parentSessionId: this.parentSessionId,
-      runs: this.runs,
+      runs: this._runs,
       ledger: this.ledger.toJSON(),
       messages: this.messages,
     }
@@ -145,6 +187,71 @@ export class Session {
 
   needsRecovery(): boolean {
     return this._needsRecovery
+  }
+
+  // ── run lifecycle ─────────────────────────────────────────────────
+
+  /**
+   * Starts the session's active run and makes its initial record durable.
+   *
+   * This is the only way to enter `running`: it establishes the run identity,
+   * appends the run's initial `RunSummary`, transitions the session to
+   * `running`, and checkpoints — in the same order the run layer used to do by
+   * hand, so the durability contract is unchanged.
+   *
+   * A session has at most one active run. A second `beginRun` while one is
+   * active is rejected: a runtime invariant, not a UI convention.
+   */
+  async beginRun(model: ModelIdentity): Promise<RunSummary> {
+    if (this.activeRunId !== null) {
+      throw new Error(`Session: a run is already active (${this.activeRunId})`)
+    }
+    const runId = crypto.randomUUID()
+    const started: RunSummary = { id: runId, startedAt: Date.now(), model }
+    this._runs.push(started)
+    this.activeRunId = runId
+    this._status = "running"
+    await this.checkpoint()
+    return started
+  }
+
+  /**
+   * Finishes the active run and makes its terminal record durable.
+   *
+   * Only the active run identity may finish. A non-active or already-finished
+   * identity is rejected, so a stale or double finalization cannot overwrite
+   * the terminal record or change the session's lifecycle state. A normal
+   * ending returns the session to `idle`; an abort leaves `interrupted` for the
+   * next process to reconcile. Terminal persistence failure is swallowed so it
+   * cannot mask the run outcome, matching the previous behavior.
+   */
+  async finishRun(runId: string, outcome: RunOutcome): Promise<RunSummary> {
+    if (this.activeRunId === null || this.activeRunId !== runId) {
+      throw new Error(`Session: run ${runId} is not the active run`)
+    }
+    const index = this._runs.findIndex(run => run.id === runId)
+    if (index === -1) {
+      throw new Error(`Session: no run record for ${runId}`)
+    }
+    const finished: RunSummary = {
+      ...this._runs[index],
+      finishedAt: Date.now(),
+      finishReason: outcome.finishReason,
+      usage: outcome.usage,
+      modelCalls: outcome.modelCalls,
+      toolCalls: outcome.toolCalls,
+      ...(outcome.pruning === undefined ? {} : { pruning: outcome.pruning }),
+      ...(outcome.error === undefined ? {} : { error: outcome.error }),
+    }
+    this._runs[index] = finished
+    this.activeRunId = null
+    this._status = outcome.aborted ? "interrupted" : "idle"
+    try {
+      await this.checkpoint()
+    } catch {
+      // Terminal persistence failure must not mask the run outcome.
+    }
+    return finished
   }
 
   // ── message lifecycle ─────────────────────────────────────────────
