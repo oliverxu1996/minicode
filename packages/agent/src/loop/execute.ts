@@ -13,7 +13,8 @@
 import type { ModelAssistantPart, ModelResponse } from "@minicode/model"
 import { toolDurationMs } from "../session/ledger"
 import type { Session } from "../session/session"
-import type { RunEvent, SessionMessage } from "../session/types"
+import type { SessionMessage } from "../session/types"
+import type { RunEvent } from "./events"
 import type { Tool, ToolResult } from "../tools/types"
 import { truncateOutput } from "../tools/truncate"
 

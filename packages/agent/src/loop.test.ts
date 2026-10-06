@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { ModelError } from "@minicode/model"
-import type { RunEvent, RunSummary } from "./session/types"
+import type { RunEvent } from "./loop/events"
+import type { RunSummary } from "./session/types"
 import { FakeModel, textResponse, toolCallResponse } from "./testing"
 import { MiniCode } from "./minicode"
 

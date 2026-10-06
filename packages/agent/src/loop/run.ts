@@ -3,10 +3,10 @@ import type { PruneStats } from "../context/projection"
 import type { Session } from "../session/session"
 import type {
   ModelIdentity,
-  RunEvent,
   RunFinishReason,
   SessionMessage,
 } from "../session/types"
+import type { RunEvent } from "./events"
 import { CODING_TOOLS } from "../tools"
 import { createSkillTool } from "../tools/skill"
 import type { Tool } from "../tools/types"

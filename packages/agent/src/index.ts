@@ -14,10 +14,10 @@ export type { MiniCodeOptions, RunResult } from "./minicode"
 export { Session, UNKNOWN_OUTCOME_ERROR, type RecoveryReport } from "./session/session"
 export { SessionStore } from "./session/store"
 export { ToolLedger, type ToolLedgerEntry, type ToolLedgerStatus } from "./session/ledger"
+export type { RunEvent } from "./loop/events"
 export type {
   AssistantMessage,
   ModelIdentity,
-  RunEvent,
   RunFinishReason,
   RunSummary,
   SessionMessage,
