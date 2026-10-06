@@ -1,5 +1,6 @@
 import { Editor, ScrollView, TuiAltScreen, type Component, type Terminal } from "@minicode/tui"
 import { buildTuiLayout } from "./layout"
+import { PickerSlot, Selector, pickerVisibleItems, type SelectorItem } from "./selector"
 
 /**
  * Test support for the fullscreen TUI layout.
@@ -98,6 +99,7 @@ export class TuiHarness {
 	readonly scroll: ScrollView
 	readonly header: GrowableLines
 	readonly chat: GrowableLines
+	readonly picker: PickerSlot
 	readonly submitted: string[] = []
 
 	private columnsValue: number
@@ -163,10 +165,12 @@ export class TuiHarness {
 		}
 		if (options.editorText !== undefined) this.editor.setText(options.editorText)
 
+		this.picker = new PickerSlot(() => pickerVisibleItems(this.rowsValue))
 		const layout = buildTuiLayout({
 			header: this.header,
 			chat: this.chat,
 			status,
+			picker: this.picker,
 			editor: this.editor,
 			footerRow1: new FixedLines(["FOOTER-1"]),
 			footerRow2: new FixedLines(["FOOTER-2"]),
@@ -174,6 +178,28 @@ export class TuiHarness {
 		this.scroll = layout.scroll
 		this.tui.setLayoutRoot(layout.root)
 		this.tui.setFocus(this.editor)
+	}
+
+	/**
+	 * Open a selector in the bottom-attached picker slot, mirroring the
+	 * application's pick path (slot contents + focus). Returns the focused
+	 * selector so tests can drive it, and reports the chosen value.
+	 */
+	openPicker(title: string, items: SelectorItem[], onResult?: (value: string | null) => void): Selector {
+		const selector = new Selector(title, items)
+		selector.onSelect = value => {
+			this.picker.setSelector(null)
+			this.tui.setFocus(this.editor)
+			onResult?.(value)
+		}
+		selector.onCancel = () => {
+			this.picker.setSelector(null)
+			this.tui.setFocus(this.editor)
+			onResult?.(null)
+		}
+		this.picker.setSelector(selector)
+		this.tui.setFocus(selector)
+		return selector
 	}
 
 	/** Register extra input listeners (e.g. the application's key translation). */

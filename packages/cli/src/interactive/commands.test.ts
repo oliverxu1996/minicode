@@ -76,26 +76,51 @@ describe("/hotkeys documentation", () => {
 })
 
 describe("selector commands share the picker path", () => {
-  test("/model and /logout open the shared selector (which paints the opaque surface)", async () => {
-    // Both commands route through ctx.pick, and the picker builds a Selector,
-    // so the opaque surface applies uniformly rather than per command.
+  test("every picker caller routes through ctx.pick with its title", async () => {
+    // All five commands route through ctx.pick, and the application renders the
+    // returned selector in the shared bottom-attached picker slot, so the
+    // presentation applies uniformly rather than per command.
     const pickedTitles: string[] = []
+    const now = Date.now()
+    const summary = {
+      id: "s1",
+      title: "existing",
+      firstUser: "hi",
+      messageCount: 2,
+      updatedAt: now,
+      parentSessionId: "current",
+    }
+    const userMessage = { id: "u1", role: "user", content: "hello", status: "complete", timestamp: 1 }
     const ctx = {
       agent: () => ({
         modelManager: async () => ({ list: () => [{ id: "m1" }, { id: "m2" }] }),
         currentModel: async () => ({ id: "m1" }),
         removeModel: () => {},
+        sessionSummaries: async () => [summary],
+        loadSession: async () => ({}),
+        createSession: () => ({}),
       }),
+      session: () => ({ id: "current", cwd: "/tmp", messages: [userMessage], status: "idle" }),
       pick: async (title: string) => {
         pickedTitles.push(title)
         return null
       },
       notify: () => {},
+      setSession: () => {},
     } as unknown as CommandContext
 
     await findCommand("model")!.execute(ctx, "")
     await findCommand("logout")!.execute(ctx, "")
+    await findCommand("resume")!.execute(ctx, "")
+    await findCommand("fork")!.execute(ctx, "")
+    await findCommand("tree")!.execute(ctx, "")
 
-    expect(pickedTitles).toEqual(["Select model", "Remove model"])
+    expect(pickedTitles).toEqual([
+      "Select model",
+      "Remove model",
+      "Resume session",
+      "Fork from message",
+      "Forked sessions",
+    ])
   })
 })

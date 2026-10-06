@@ -1,4 +1,4 @@
-import { Box, Container, Text, type Component } from "@minicode/tui"
+import { Box, Container, TruncatedText, type Component } from "@minicode/tui"
 import { ansi, surface } from "./theme"
 
 export interface SelectorItem {
@@ -8,12 +8,28 @@ export interface SelectorItem {
 }
 
 /**
+ * Chrome rows the picker must leave below itself: the composer (top border +
+ * content + bottom border), the two footer rows, and a two-row status region.
+ * The picker never renders taller than this reservation allows, so an open
+ * picker cannot push the composer or footer off-screen.
+ */
+const PICKER_CHROME_ROWS = 9
+
+/**
+ * Maximum number of item rows the picker may show for a terminal of the given
+ * height. The picker adds a title row and a hint row around the items.
+ */
+export function pickerVisibleItems(terminalRows: number): number {
+  return Math.max(1, Math.floor(terminalRows) - PICKER_CHROME_ROWS)
+}
+
+/**
  * Chat selector: arrow keys move, Enter confirms, Escape cancels. Focusable
  * through the `focused` flag so the TUI forwards key input to it while open.
  *
- * Rendered as an opaque panel: the content is wrapped in a background `Box`, so
- * when shown as an overlay it fully covers whatever is behind its bounds rather
- * than floating as bare text over the conversation.
+ * Rendered as an opaque panel: the content is wrapped in a background `Box`.
+ * The list is windowed to `maxVisibleItems` rows so the panel stays bounded on
+ * any terminal and the selected item remains visible.
  */
 export class Selector implements Component {
   focused = false
@@ -23,13 +39,22 @@ export class Selector implements Component {
   private readonly container = new Container()
   private readonly panel = new Box(0, 0, surface)
   private index = 0
-  private readonly rendered: string[] = []
+  private scrollOffset = 0
+  private maxVisibleItems = Number.POSITIVE_INFINITY
 
   constructor(
     readonly title: string,
     private readonly items: SelectorItem[],
   ) {
     this.panel.addChild(this.container)
+    this.rebuild()
+  }
+
+  /** Cap the number of item rows rendered; keeps the selected item in view. */
+  setMaxVisibleItems(count: number): void {
+    const next = Number.isFinite(count) && count >= 1 ? Math.floor(count) : Number.POSITIVE_INFINITY
+    if (next === this.maxVisibleItems) return
+    this.maxVisibleItems = next
     this.rebuild()
   }
 
@@ -47,17 +72,35 @@ export class Selector implements Component {
     this.onCancel?.()
   }
 
+  private visibleRange(): { start: number; end: number } {
+    const maxItems = Number.isFinite(this.maxVisibleItems)
+      ? Math.max(1, this.maxVisibleItems)
+      : this.items.length
+    // Keep the selected item inside the window.
+    if (this.index < this.scrollOffset) this.scrollOffset = this.index
+    else if (this.index >= this.scrollOffset + maxItems) this.scrollOffset = this.index - maxItems + 1
+    const maxOffset = Math.max(0, this.items.length - maxItems)
+    this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxOffset))
+    const start = this.scrollOffset
+    const end = Math.min(this.items.length, start + maxItems)
+    return { start, end }
+  }
+
   private rebuild(): void {
+    const { start, end } = this.visibleRange()
     this.container.clear()
-    this.container.addChild(new Text(`  ${ansi.bold(this.title)}`, 0, 0))
-    this.items.forEach((item, i) => {
+    // Each row is a single truncated line, so the panel's height is exactly
+    // `visibleItems + 2` regardless of terminal width or label length.
+    this.container.addChild(new TruncatedText(`  ${ansi.bold(this.title)}`, 0, 0))
+    for (let i = start; i < end; i++) {
+      const item = this.items[i]!
       const selected = i === this.index
       const marker = selected ? ansi.green("❯ ") : "  "
       const label = selected ? ansi.bold(item.label) : item.label
       const description = item.description !== undefined ? ` ${ansi.gray(item.description)}` : ""
-      this.container.addChild(new Text(`${marker}${label}${description}`, 0, 0))
-    })
-    this.container.addChild(new Text(ansi.gray("  ↑/↓ move · enter select · esc cancel"), 0, 0))
+      this.container.addChild(new TruncatedText(`${marker}${label}${description}`, 0, 0))
+    }
+    this.container.addChild(new TruncatedText(ansi.gray("  ↑/↓ move · enter select · esc cancel"), 0, 0))
   }
 
   handleInput(data: string): void {
@@ -71,7 +114,34 @@ export class Selector implements Component {
   invalidate(): void {}
 
   render(width: number): string[] {
-    void this.rendered
     return this.panel.render(width)
+  }
+}
+
+/**
+ * The bottom-attached picker slot: a fixed-height VStack entry directly above
+ * the composer. It renders the active selector, or nothing when closed, so an
+ * open picker consumes conversation viewport height instead of floating over
+ * the conversation. `maxVisibleItems` is read every render so the window follows
+ * terminal resizes.
+ */
+export class PickerSlot implements Component {
+  private selector: Selector | null = null
+
+  constructor(private readonly maxVisibleItems: () => number = () => Number.POSITIVE_INFINITY) {}
+
+  /** Show `selector` in the slot, or clear it with null. */
+  setSelector(selector: Selector | null): void {
+    this.selector = selector
+  }
+
+  invalidate(): void {
+    this.selector?.invalidate()
+  }
+
+  render(width: number): string[] {
+    if (this.selector === null) return []
+    this.selector.setMaxVisibleItems(this.maxVisibleItems())
+    return this.selector.render(width)
   }
 }

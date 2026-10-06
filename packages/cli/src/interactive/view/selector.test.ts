@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Selector } from "./selector"
+import { Selector, pickerVisibleItems } from "./selector"
 import { surface } from "./theme"
 import { stripSequences } from "./testing"
 
@@ -82,5 +82,44 @@ describe("Selector interaction", () => {
 		selector.handleInput("\x1b")
 		expect(cancelled).toBe(true)
 		expect(selected).toBeUndefined()
+	})
+})
+
+describe("Selector windowing", () => {
+	function many(count: number): Array<{ value: string; label: string }> {
+		return Array.from({ length: count }, (_, i) => ({ value: String(i), label: `item ${i}` }))
+	}
+
+	test("a cap shows only that many item rows plus title and hint", () => {
+		const selector = new Selector("Pick", many(20))
+		selector.setMaxVisibleItems(3)
+		const lines = selector.render(30).map(stripSequences)
+		// title + 3 items + hint
+		expect(lines).toHaveLength(5)
+		expect(lines[0]).toContain("Pick")
+		expect(lines[4]).toContain("enter select")
+	})
+
+	test("moving past the window scrolls it to keep the selection visible", () => {
+		const selector = new Selector("Pick", many(20))
+		selector.setMaxVisibleItems(3)
+		for (let i = 0; i < 10; i++) selector.handleInput("\x1b[B")
+		const lines = selector.render(30).map(stripSequences)
+		expect(lines).toHaveLength(5)
+		const selected = lines.find(line => line.includes("❯"))
+		expect(selected).toContain("item 10")
+	})
+
+	test("an unbounded selector shows every item", () => {
+		const selector = new Selector("Pick", many(5))
+		expect(selector.render(30).length).toBe(5 + 2)
+	})
+
+	test("pickerVisibleItems reserves room for the composer and footer", () => {
+		expect(pickerVisibleItems(24)).toBe(15)
+		expect(pickerVisibleItems(12)).toBe(3)
+		// Never below one item row, even on a too-small terminal.
+		expect(pickerVisibleItems(8)).toBe(1)
+		expect(pickerVisibleItems(4)).toBe(1)
 	})
 })

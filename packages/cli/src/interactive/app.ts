@@ -8,7 +8,6 @@ import {
 	ProcessTerminal,
 	matchesKey,
 	type Component,
-	type OverlayHandle,
 } from "@minicode/tui"
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
@@ -27,7 +26,7 @@ import {
 import { FooterLineView } from "./view/footer"
 import { buildTuiLayout } from "./view/layout"
 import { runCompaction } from "./compaction"
-import { Selector, type SelectorItem } from "./view/selector"
+import { Selector, PickerSlot, pickerVisibleItems, type SelectorItem } from "./view/selector"
 import { MiniCodeAutocomplete } from "./input/autocomplete"
 import { altEnterAsNewline } from "./input/alt-enter"
 import { expandFileReferences } from "./input/expand"
@@ -76,6 +75,8 @@ export class MiniCodeTui {
 	private readonly editor: Editor
 	private readonly footerRow1 = new FooterLineView()
 	private readonly footerRow2 = new FooterLineView()
+	/** Bottom-attached transient picker, rendered directly above the composer. */
+	private readonly picker: PickerSlot
 
 	private readonly loader: Loader
 	private session: Session
@@ -99,7 +100,6 @@ export class MiniCodeTui {
 	private streaming: Container | null = null
 	private streamingText = ""
 	private selector: Selector | null = null
-	private selectorOverlay: OverlayHandle | null = null
 	private askState: AskState | null = null
 	private promptTemplates: Array<{ name: string; description: string }> = []
 	private reasoning: Container | null = null
@@ -119,10 +119,16 @@ export class MiniCodeTui {
 		header.addChild(new Text(`  ${hints}`, 0, 0))
 
 		this.editor = this.createEditor()
+		// The picker is a fixed VStack entry directly above the composer; it
+		// renders zero rows until a selector is opened, and caps its own height
+		// from the live terminal size so it can never push the composer or
+		// footer off-screen.
+		this.picker = new PickerSlot(() => pickerVisibleItems(this.tui.terminal.rows))
 		const layout = buildTuiLayout({
 			header,
 			chat: this.chat,
 			status: this.status,
+			picker: this.picker,
 			editor: this.editor,
 			footerRow1: this.footerRow1,
 			footerRow2: this.footerRow2,
@@ -164,15 +170,15 @@ export class MiniCodeTui {
 					items as SelectorItem[],
 				)
 				return new Promise<string | null>(resolve => {
-					// The selector is shown as a modal overlay so it owns input while
-					// open: viewport keys are deferred to it and the conversation does
-					// not scroll underneath the picker.
+					// The selector fills the bottom-attached picker slot so it owns
+					// input while open: viewport keys are deferred to the focused
+					// selector, and closing restores the composer's focus.
 					const close = (): void => {
 						if (this.selector !== selector) return
 						this.selector = null
-						this.selectorOverlay?.hide()
-						this.selectorOverlay = null
+						this.picker.setSelector(null)
 						this.tui.setFocus(this.editor)
+						this.tui.requestRender()
 					}
 					selector.onSelect = value => {
 						close()
@@ -183,12 +189,8 @@ export class MiniCodeTui {
 						resolve(null)
 					}
 					this.selector = selector
-					this.selectorOverlay = this.tui.showOverlay(selector, {
-						anchor: "center",
-						width: "80%",
-						minWidth: 40,
-						margin: 1,
-					})
+					this.picker.setSelector(selector)
+					this.tui.setFocus(selector)
 					this.tui.requestRender()
 				})
 			},
