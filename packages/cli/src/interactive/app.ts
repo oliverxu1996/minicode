@@ -10,11 +10,10 @@ import {
 	type Component,
 } from "@minicode/tui"
 import { readFileSync, readdirSync, statSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
 import type { ModelLimits } from "@minicode/model"
 import type { MiniCode, RunEvent, Session, SessionMessage, Skill } from "@minicode/agent"
-import { isProjectTrusted, loadResources, loadSettings } from "@minicode/agent"
+import { configDir, isProjectTrusted, loadResources, loadSettings } from "@minicode/agent"
 import { ansi, markdownTheme } from "./view/theme"
 import {
 	NO_RUN_DISPLAY,
@@ -392,7 +391,7 @@ export class MiniCodeTui {
 	}
 
 	private readTemplate(name: string): string | null {
-		const userDir = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "minicode", "prompts")
+		const userDir = join(configDir(), "prompts")
 		for (const dir of [join(this.session.cwd, ".minicode", "prompts"), userDir]) {
 			try {
 				return readFileSync(join(dir, `${name}.md`), "utf-8")

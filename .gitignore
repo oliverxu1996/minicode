@@ -54,9 +54,6 @@ Desktop.ini
 .claude/
 CLAUDE.local.md
 
-# Runtime tool-output spill (bash/truncate artifacts from agent runs)
-.tool-output/
-
 # cli package build/pack artifacts
 packages/cli/dist/
 packages/cli/CHANGELOG.md

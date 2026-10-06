@@ -87,7 +87,7 @@ export async function executeTool(
   }
 
   // read output is already shaped and capped by the tool itself.
-  const truncated = name === "read" ? output : truncateOutput(output, session.cwd, name)
+  const truncated = name === "read" ? output : truncateOutput(output, name)
 
   const toolMsg = session.toolResultMessageFor(assistantMsg)
   session.appendToolResult(toolMsg, {

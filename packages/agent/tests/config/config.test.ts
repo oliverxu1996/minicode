@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { configDir, copyLegacyConfigIfNeeded } from "../../src/config/dir"
 import { loadSettings, projectSettingsPath, globalSettingsPath } from "../../src/config/settings"
 import { formatProjectInstructions, loadProjectContext } from "../../src/config/context"
 import { loadResources } from "../../src/config/resources"
@@ -24,8 +25,8 @@ describe("settings (AC10)", () => {
 
   test("project settings override global settings with deep merge", () => {
     const dir = tempDir()
-    const previous = process.env.XDG_CONFIG_HOME
-    process.env.XDG_CONFIG_HOME = dir
+    const previous = process.env.MINICODE_CONFIG_DIR
+    process.env.MINICODE_CONFIG_DIR = dir
     try {
       const globalPath = globalSettingsPath()
       const projectPath = projectSettingsPath(dir)
@@ -43,23 +44,23 @@ describe("settings (AC10)", () => {
       expect(loaded.settings.autoCompact?.enabled).toBe(true)
       expect(loaded.settings.model).toBe("mine")
     } finally {
-      if (previous === undefined) delete process.env.XDG_CONFIG_HOME
-      else process.env.XDG_CONFIG_HOME = previous
+      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
+      else process.env.MINICODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
   test("malformed settings throw with the file path", () => {
     const dir = tempDir()
-    const previous = process.env.XDG_CONFIG_HOME
-    process.env.XDG_CONFIG_HOME = dir
+    const previous = process.env.MINICODE_CONFIG_DIR
+    process.env.MINICODE_CONFIG_DIR = dir
     try {
-      mkdirSync(join(dir, "minicode"), { recursive: true })
+      mkdirSync(dir, { recursive: true })
       writeFileSync(globalSettingsPath(), "{ broken")
       expect(() => loadSettings(dir)).toThrow(/malformed|invalid settings file/)
     } finally {
-      if (previous === undefined) delete process.env.XDG_CONFIG_HOME
-      else process.env.XDG_CONFIG_HOME = previous
+      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
+      else process.env.MINICODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -111,18 +112,80 @@ describe("resources and project trust (AC13/AC17)", () => {
 
   test("user prompt templates load without trust", () => {
     const dir = tempDir()
-    const previous = process.env.XDG_CONFIG_HOME
-    process.env.XDG_CONFIG_HOME = dir
+    const previous = process.env.MINICODE_CONFIG_DIR
+    process.env.MINICODE_CONFIG_DIR = dir
     try {
-      const promptsDir = join(dir, "minicode", "prompts")
+      const promptsDir = join(dir, "prompts")
       mkdirSync(promptsDir, { recursive: true })
       writeFileSync(join(promptsDir, "daily.md"), "Do the daily thing.")
       const resources = loadResources(dir, false)
       expect(resources.prompts).toEqual([{ name: "daily", content: "Do the daily thing.", source: "user" }])
     } finally {
-      if (previous === undefined) delete process.env.XDG_CONFIG_HOME
-      else process.env.XDG_CONFIG_HOME = previous
+      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
+      else process.env.MINICODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("user config directory (~/.minicode)", () => {
+  test("configDir honors MINICODE_CONFIG_DIR", () => {
+    const dir = tempDir()
+    const previous = process.env.MINICODE_CONFIG_DIR
+    process.env.MINICODE_CONFIG_DIR = dir
+    try {
+      expect(configDir()).toBe(dir)
+    } finally {
+      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
+      else process.env.MINICODE_CONFIG_DIR = previous
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("a legacy tree is copied into the new dir and the original is left untouched", () => {
+    const from = tempDir()
+    const to = join(tempDir(), ".minicode")
+    try {
+      mkdirSync(join(from, "sessions"), { recursive: true })
+      writeFileSync(join(from, "models.json"), '{"version":1,"models":[],"activeModelId":null}')
+      writeFileSync(join(from, "sessions", "s.json"), "{}")
+
+      copyLegacyConfigIfNeeded(from, to)
+
+      expect(readFileSync(join(to, "models.json"), "utf-8")).toContain('"version":1')
+      expect(existsSync(join(to, "sessions", "s.json"))).toBe(true)
+      // Non-destructive: the source survives.
+      expect(existsSync(join(from, "models.json"))).toBe(true)
+    } finally {
+      rmSync(from, { recursive: true, force: true })
+      rmSync(to, { recursive: true, force: true })
+    }
+  })
+
+  test("migration is a no-op when the target already exists", () => {
+    const from = tempDir()
+    const to = tempDir()
+    try {
+      writeFileSync(join(from, "models.json"), "legacy")
+      writeFileSync(join(to, "models.json"), "current")
+
+      copyLegacyConfigIfNeeded(from, to)
+
+      // The existing target wins — migration never overwrites it.
+      expect(readFileSync(join(to, "models.json"), "utf-8")).toBe("current")
+    } finally {
+      rmSync(from, { recursive: true, force: true })
+      rmSync(to, { recursive: true, force: true })
+    }
+  })
+
+  test("migration is a no-op when there is no legacy tree", () => {
+    const to = join(tempDir(), ".minicode")
+    try {
+      copyLegacyConfigIfNeeded(join(tmpdir(), "minicode-does-not-exist-xyz"), to)
+      expect(existsSync(to)).toBe(false)
+    } finally {
+      rmSync(to, { recursive: true, force: true })
     }
   })
 })

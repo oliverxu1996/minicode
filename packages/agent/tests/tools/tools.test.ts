@@ -165,7 +165,7 @@ describe("coding tools (AC2/AC3/AC4)", () => {
       { command: "i=0; while [ $i -lt 20000 ]; do echo line-$i; i=$((i+1)); done" },
       ctx(dir),
     )
-    const capped = truncateOutput(produced, dir, "bash")
+    const capped = truncateOutput(produced, "bash")
     if (!capped.ok) throw new Error("unreachable")
 
     // Bounded for the model…

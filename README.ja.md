@@ -112,7 +112,7 @@ MiniCode は 2 つのプロトコルを話します。公式 API と、互換性
 | Ctrl+P | 設定済みモデルを順に切り替え |
 
 設定はローカルの設定ディレクトリに保存されます
-（`$XDG_CONFIG_HOME/minicode/models.json`、デフォルトは `~/.config/minicode/models.json`）。このファイルを直接編集することもできます。
+（`~/.minicode/models.json`）。このファイルを直接編集することもできます。
 
 ## エージェントとの作業
 
@@ -156,7 +156,7 @@ MiniCode は、リポジトリのルートにある指示ファイルを読み�
 
 最初に見つかったファイルがエージェントのシステムプロンプトに読み込まれるため、最初のメッセージからプロジェクトのルールに従って動作します。
 
-さらに、プロジェクトローカルの**プロンプトテンプレート**（`.minicode/prompts/*.md`）と**スキル**（`.minicode/skills/<name>/SKILL.md`）を追加できます。これらのファイルはエージェントの動作を方向づけるため、プロジェクトローカルのものを読み込む前に、`/trust` による信頼の確認を求めます。グローバル設定は `~/.config/minicode/settings.json` にあり、プロジェクトの `.minicode/settings.json` で上書きできます。
+さらに、プロジェクトローカルの**プロンプトテンプレート**（`.minicode/prompts/*.md`）と**スキル**（`.minicode/skills/<name>/SKILL.md`）を追加できます。これらのファイルはエージェントの動作を方向づけるため、プロジェクトローカルのものを読み込む前に、`/trust` による信頼の確認を求めます。グローバル設定は `~/.minicode/settings.json` にあり、プロジェクトの `.minicode/settings.json` で上書きできます。
 
 ## スクリプトと自動化
 

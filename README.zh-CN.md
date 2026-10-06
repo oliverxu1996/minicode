@@ -112,7 +112,7 @@ MiniCode 支持两种协议，因此既可以对接官方 API，也可以对接�
 | Ctrl+P | 在已配置的模型之间循环切换 |
 
 配置保存在你的配置目录下
-（`$XDG_CONFIG_HOME/minicode/models.json`，默认 `~/.config/minicode/models.json`）——你也可以直接编辑这个文件。
+（`~/.minicode/models.json`）——你也可以直接编辑这个文件。
 
 ## 与智能体协作
 
@@ -156,7 +156,7 @@ MiniCode 会读取仓库根目录下的指令文件，在开始工作之前了�
 
 找到的第一个文件会被加载进智能体的系统提示词，因此从第一条消息开始，智能体就会遵循你项目的规则。
 
-你还可以添加项目本地的**提示词模板**（`.minicode/prompts/*.md`）和**技能**（`.minicode/skills/<name>/SKILL.md`）。由于这些文件能够引导智能体的行为，MiniCode 会先请你信任它们（`/trust`），然后才会加载项目本地的内容。全局配置位于 `~/.config/minicode/settings.json`，并可在项目的 `.minicode/settings.json` 中覆盖。
+你还可以添加项目本地的**提示词模板**（`.minicode/prompts/*.md`）和**技能**（`.minicode/skills/<name>/SKILL.md`）。由于这些文件能够引导智能体的行为，MiniCode 会先请你信任它们（`/trust`），然后才会加载项目本地的内容。全局配置位于 `~/.minicode/settings.json`，并可在项目的 `.minicode/settings.json` 中覆盖。
 
 ## 脚本与自动化
 

@@ -1,4 +1,3 @@
-import { homedir } from "node:os"
 import { join } from "node:path"
 import { ModelManager, type Model, type ModelConfig } from "@minicode/model"
 import { Session } from "./session/session"
@@ -11,11 +10,11 @@ import { loadSettings } from "./config/settings"
 import { isProjectTrusted } from "./config/trust"
 import { formatProjectInstructions, loadProjectContext } from "./config/context"
 import { loadResources } from "./config/resources"
+import { configDir } from "./config/dir"
 
 export interface MiniCodeOptions {
-  /** Session storage directory. Defaults to
-   *  `XDG_CONFIG_HOME ?? ~/.config` + `/minicode/sessions` — sessions are
-   *  kept out of the target repository. */
+  /** Session storage directory. Defaults to `~/.minicode/sessions` — sessions
+   *  are kept out of the target repository. */
   sessionsDir?: string
   /** Model override. Defaults to the active model resolved LIVE from
    *  `@minicode/model` ModelManager at each run. */
@@ -101,7 +100,7 @@ export class MiniCode {
     if (model === undefined) {
       throw new Error(
         "No active model configured. Create " +
-          `${process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config")}/minicode/models.json ` +
+          `${join(configDir(), "models.json")} ` +
           'with {"version":1,"models":[{"id":"…","name":"…","protocol":"openai"|"anthropic","endpoint":"…","model":"…","apiKey":"…","contextWindow":128000,"maxOutputTokens":8192}],"activeModelId":"…"} ' +
           "and restart, or pass a Model to new MiniCode({ model }).",
       )
@@ -197,8 +196,7 @@ export class MiniCode {
 }
 
 function defaultSessionsDir(): string {
-  const base = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config")
-  return join(base, "minicode", "sessions")
+  return join(configDir(), "sessions")
 }
 
 export type { RunResult } from "./loop/run"

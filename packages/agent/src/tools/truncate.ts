@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ToolResult } from "./types"
 
@@ -15,8 +16,14 @@ function hash(s: string): string {
 
 /**
  * Caps tool output at THRESHOLD bytes: larger outputs spill to
- * `<cwd>/.tool-output/<tool>-<hash>.txt` and the model receives a preview plus
- * a pointer it can `read` with offset/limit.
+ * `<os.tmpdir()>/minicode-tool-output/<tool>-<hash>.txt` and the model receives
+ * a preview plus a pointer it can `read` with offset/limit.
+ *
+ * The spill lives in the OS temp directory rather than the workspace: the full
+ * text is a recovery artifact, not repository content, so writing it next to
+ * the project would otherwise force every project to ignore a directory the
+ * runtime created. The `read` tool resolves absolute paths, so recovery is
+ * unaffected.
  *
  * This is the canonical boundary and it is unconditional. `ok` decides where
  * the bounded text lives (`data` or `error`), never whether it is bounded: a
@@ -26,12 +33,12 @@ function hash(s: string): string {
  * survives in the preview, and the full text is recoverable from the prose
  * pointer. `failureEvidence` on a successful result is preserved.
  */
-export function truncateOutput(result: ToolResult, cwd: string, toolName?: string): ToolResult {
+export function truncateOutput(result: ToolResult, toolName?: string): ToolResult {
   const text = result.ok ? result.data : result.error
   if (text.length <= THRESHOLD) return result
 
   const slug = `${toolName ?? "tool"}-${hash(text)}.txt`
-  const dir = join(cwd, ".tool-output")
+  const dir = join(tmpdir(), "minicode-tool-output")
   try {
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, slug), text, "utf-8")

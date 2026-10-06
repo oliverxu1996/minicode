@@ -27,6 +27,7 @@ export type {
   UserMessage,
 } from "./session/types"
 export { Compactor, type CompactionOutcome } from "./context/compaction"
+export { configDir, migrateLegacyConfig } from "./config/dir"
 export { loadSettings } from "./config/settings"
 export { loadResources, type PromptTemplate, type Skill } from "./config/resources"
 export { isProjectTrusted, trustProject } from "./config/trust"

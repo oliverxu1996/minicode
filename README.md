@@ -114,7 +114,7 @@ Model-related commands:
 | Ctrl+P | Cycle through configured models |
 
 Configuration is persisted locally under your config directory
-(`$XDG_CONFIG_HOME/minicode/models.json`, default `~/.config/minicode/models.json`) — you can also edit that file directly.
+(`~/.minicode/models.json`) — you can also edit that file directly.
 
 ## Working with the agent
 
@@ -158,7 +158,7 @@ MiniCode reads instruction files from your repository root to understand your pr
 
 The first file found is loaded into the agent's system prompt, so the agent follows your project's rules from the first message.
 
-You can also add project-local **prompt templates** (`.minicode/prompts/*.md`) and **skills** (`.minicode/skills/<name>/SKILL.md`). Because these files can direct the agent, MiniCode asks you to trust them first (`/trust`) before it loads project-local ones. Global settings live in `~/.config/minicode/settings.json` and can be overridden per project in `.minicode/settings.json`.
+You can also add project-local **prompt templates** (`.minicode/prompts/*.md`) and **skills** (`.minicode/skills/<name>/SKILL.md`). Because these files can direct the agent, MiniCode asks you to trust them first (`/trust`) before it loads project-local ones. Global settings live in `~/.minicode/settings.json` and can be overridden per project in `.minicode/settings.json`.
 
 ## Scripting and automation
 

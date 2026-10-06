@@ -16,15 +16,15 @@ function tempDir(): { dir: string; cleanup: () => void } {
 describe("Model resolution (V2)", () => {
   test("MiniCode without a configured model reports the missing dependency", async () => {
     const { dir, cleanup } = tempDir()
-    const previousConfigDir = process.env.XDG_CONFIG_HOME
-    process.env.XDG_CONFIG_HOME = join(dir, "config")
+    const previousConfigDir = process.env.MINICODE_CONFIG_DIR
+    process.env.MINICODE_CONFIG_DIR = join(dir, "config")
     try {
       const agent = new MiniCode()
       const session = agent.createSession(join(dir, "ws"))
       await expect(agent.run(session, "no model")).rejects.toThrow(/No active model/)
     } finally {
-      if (previousConfigDir === undefined) delete process.env.XDG_CONFIG_HOME
-      else process.env.XDG_CONFIG_HOME = previousConfigDir
+      if (previousConfigDir === undefined) delete process.env.MINICODE_CONFIG_DIR
+      else process.env.MINICODE_CONFIG_DIR = previousConfigDir
     }
     cleanup()
   })

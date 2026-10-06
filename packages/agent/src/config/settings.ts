@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { configDir } from "./dir"
 
 /** Runtime-tunable settings: global file merged under project
  *  file (project wins), nested objects merge recursively. */
@@ -30,8 +30,7 @@ export interface LoadedSettings {
 }
 
 export function globalSettingsPath(): string {
-  const base = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config")
-  return join(base, "minicode", "settings.json")
+  return join(configDir(), "settings.json")
 }
 
 export function projectSettingsPath(cwd: string): string {

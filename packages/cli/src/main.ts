@@ -1,4 +1,4 @@
-import { MiniCode } from "@minicode/agent"
+import { MiniCode, migrateLegacyConfig } from "@minicode/agent"
 import { MINICODE_VERSION } from "./version"
 import { MiniCodeTui } from "./interactive/app"
 import { runPrint } from "./print"
@@ -113,7 +113,7 @@ usage: minicode [options] [workspace]
 
 first run: use /login inside the TUI to configure a model
 (protocol, endpoint, model name, API key), or write
-$XDG_CONFIG_HOME/minicode/models.json directly.`
+~/.minicode/models.json directly.`
 }
 
 /**
@@ -129,6 +129,9 @@ export async function runCli(argv: string[], io: CliIO): Promise<number | null> 
     io.stdout(MINICODE_VERSION + "\n")
     return 0
   }
+
+  // Carry over a pre-`~/.minicode` install once, before anything reads config.
+  migrateLegacyConfig()
 
   const args = parseArgs(argv)
 

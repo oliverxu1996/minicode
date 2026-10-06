@@ -8,13 +8,13 @@
  * That is the whole reason this file exists — it is not a general constants
  * module, and nothing unrelated belongs in it.
  *
- * `.tool-output` is the runtime's own spill directory (see `tools/truncate.ts`)
- * and `.minicode` holds per-project settings and trust, so neither is
- * repository content an agent should read or complete against.
+ * `.minicode` holds per-project settings and trust, so it is not repository
+ * content an agent should read or complete against. Spilled tool output is not
+ * listed here: it lives in the OS temp directory (`tools/truncate.ts`), never
+ * inside the workspace.
  */
 export const IGNORED_WORKSPACE_ENTRIES: ReadonlySet<string> = new Set([
   ".git",
   "node_modules",
-  ".tool-output",
   ".minicode",
 ])

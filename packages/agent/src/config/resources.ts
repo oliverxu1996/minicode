@@ -1,11 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
+import { configDir } from "./dir"
 
 /**
  * Project/user resources: prompt templates and skills.
  *
- * - Global resources live under `<XDG_CONFIG_HOME>/minicode/` and always load.
+ * - Global resources live under `~/.minicode/` and always load.
  * - Project resources live under `<cwd>/.minicode/` and load only after the
  *   project has been trusted (`/trust`), because their content reaches the
  *   model and can direct the agent to execute commands.
@@ -34,8 +34,7 @@ export interface LoadedResources {
 }
 
 export function userResourceDir(): string {
-  const base = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config")
-  return join(base, "minicode")
+  return configDir()
 }
 
 export function projectResourceDir(cwd: string): string {

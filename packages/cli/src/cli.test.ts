@@ -101,8 +101,8 @@ describe("CLI interactive guard", () => {
 
   test("print mode is not blocked by the guard", async () => {
     const dir = tempDir()
-    const previous = process.env.XDG_CONFIG_HOME
-    process.env.XDG_CONFIG_HOME = dir
+    const previous = process.env.MINICODE_CONFIG_DIR
+    process.env.MINICODE_CONFIG_DIR = dir
     try {
       const c = capture(false)
       // No model is configured in the isolated config dir, so this fails on
@@ -111,8 +111,8 @@ describe("CLI interactive guard", () => {
       expect(String(outcome)).toMatch(/No active model configured/)
       expect(c.stderr()).not.toContain("stdin is not a terminal")
     } finally {
-      if (previous === undefined) delete process.env.XDG_CONFIG_HOME
-      else process.env.XDG_CONFIG_HOME = previous
+      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
+      else process.env.MINICODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
     }
   })

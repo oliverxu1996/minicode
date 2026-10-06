@@ -383,12 +383,12 @@ describe("failure evidence survives capture-time truncation (I3)", () => {
 
   test("short output is returned unchanged, keeping the flag", () => {
     const result = { ok: true as const, data: "boom\n(exit code: 1)", failureEvidence: true as const }
-    expect(truncateOutput(result, cwd, "bash")).toBe(result)
+    expect(truncateOutput(result, "bash")).toBe(result)
   })
 
   test("long output that spills to a file keeps the flag", () => {
     const long = `${"e".repeat(5000)}\n(exit code: 1)`
-    const truncated = truncateOutput({ ok: true, data: long, failureEvidence: true }, cwd, "bash")
+    const truncated = truncateOutput({ ok: true, data: long, failureEvidence: true }, "bash")
 
     expect(truncated.ok).toBe(true)
     if (!truncated.ok) throw new Error("unreachable")
@@ -398,7 +398,7 @@ describe("failure evidence survives capture-time truncation (I3)", () => {
   })
 
   test("a successful long result carries no failure evidence", () => {
-    const truncated = truncateOutput({ ok: true, data: "y".repeat(5000) }, cwd, "bash")
+    const truncated = truncateOutput({ ok: true, data: "y".repeat(5000) }, "bash")
     if (!truncated.ok) throw new Error("unreachable")
     expect(truncated.failureEvidence).toBeUndefined()
   })

@@ -5,7 +5,7 @@ import type { Model, ModelConfig } from "./index"
 import { ModelManager } from "./index"
 
 /**
- * Runs `run` with `XDG_CONFIG_HOME` redirected to a fresh temporary
+ * Runs `run` with `MINICODE_CONFIG_DIR` redirected to a fresh temporary
  * directory, restoring the environment and removing the directory after.
  *
  * Configuration loads and mutations execute synchronously once triggered, so
@@ -14,29 +14,25 @@ import { ModelManager } from "./index"
  */
 export async function withConfigDir<T>(run: () => Promise<T> | T): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "minicode-model-test-"))
-  const previous = process.env.XDG_CONFIG_HOME
-  process.env.XDG_CONFIG_HOME = dir
+  const previous = process.env.MINICODE_CONFIG_DIR
+  process.env.MINICODE_CONFIG_DIR = dir
   try {
     return await run()
   } finally {
-    if (previous === undefined) delete process.env.XDG_CONFIG_HOME
-    else process.env.XDG_CONFIG_HOME = previous
+    if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
+    else process.env.MINICODE_CONFIG_DIR = previous
     rmSync(dir, { recursive: true, force: true })
   }
 }
 
 /** The configuration file path inside the current config dir. */
 export function configFile(): string {
-  return join(
-    process.env.XDG_CONFIG_HOME!,
-    "minicode",
-    "models.json",
-  )
+  return join(process.env.MINICODE_CONFIG_DIR!, "models.json")
 }
 
 /** Writes a configuration file directly, bypassing the manager. */
 export function writeConfigFile(content: string): void {
-  mkdirSync(join(process.env.XDG_CONFIG_HOME!, "minicode"), { recursive: true })
+  mkdirSync(process.env.MINICODE_CONFIG_DIR!, { recursive: true })
   writeFileSync(configFile(), content, "utf-8")
 }
 

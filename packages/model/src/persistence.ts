@@ -17,12 +17,12 @@ interface PersistedState {
 
 const EMPTY_STATE: PersistedState = { version: 1, models: [], activeModelId: null }
 
-/** Location of the configuration file, under the OS user config directory.
- *  Honors `XDG_CONFIG_HOME`, so tests and alternative installs can redirect
- *  it — the same convention the session store uses. */
+/** Location of the configuration file: `~/.minicode/models.json`, overridable
+ *  with `MINICODE_CONFIG_DIR` so tests and alternative installs can redirect
+ *  it — the same location the rest of the runtime uses. */
 function configPath(): string {
-  const base = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config")
-  return join(base, "minicode", "models.json")
+  const base = process.env.MINICODE_CONFIG_DIR ?? join(homedir(), ".minicode")
+  return join(base, "models.json")
 }
 
 /**

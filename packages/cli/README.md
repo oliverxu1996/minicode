@@ -35,7 +35,7 @@ and `.minicode/skills/<name>/SKILL.md` add project settings, prompt
 templates, and skills (loaded after `/trust`).
 
 Configuration and sessions live under your user config directory
-(`$XDG_CONFIG_HOME/minicode/`, default `~/.config/minicode/`) — never inside
+(`~/.minicode/`) — never inside
 this package.
 
 See the repository README for the full product documentation.

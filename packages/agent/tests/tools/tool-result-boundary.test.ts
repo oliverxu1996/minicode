@@ -68,7 +68,7 @@ describe("P0-1 — failed results pass the canonical output boundary", () => {
       const partial = Array.from({ length: 4000 }, (_, i) => `line-${i}`).join("\n")
       const error = `Command timed out after 2.0m.\nPartial output:\n${partial}`
 
-      const capped = truncateOutput({ ok: false, error }, cwd, "bash")
+      const capped = truncateOutput({ ok: false, error }, "bash")
 
       expect(capped.ok).toBe(false)
       if (capped.ok) throw new Error("unreachable")
@@ -91,7 +91,7 @@ describe("P0-1 — failed results pass the canonical output boundary", () => {
     const { cwd, cleanup } = tempCwd()
     try {
       const result = { ok: false as const, error: "Command is empty." }
-      expect(truncateOutput(result, cwd, "bash")).toBe(result)
+      expect(truncateOutput(result, "bash")).toBe(result)
     } finally {
       cleanup()
     }
@@ -101,9 +101,9 @@ describe("P0-1 — failed results pass the canonical output boundary", () => {
     const { cwd, cleanup } = tempCwd()
     try {
       const atLimit = { ok: false as const, error: "x".repeat(THRESHOLD) }
-      expect(truncateOutput(atLimit, cwd, "bash")).toBe(atLimit)
+      expect(truncateOutput(atLimit, "bash")).toBe(atLimit)
 
-      const overLimit = truncateOutput({ ok: false, error: "y".repeat(THRESHOLD + 1) }, cwd, "bash")
+      const overLimit = truncateOutput({ ok: false, error: "y".repeat(THRESHOLD + 1) }, "bash")
       expect(overLimit.ok).toBe(false)
       if (overLimit.ok) throw new Error("unreachable")
       expect(overLimit.error).toContain("Full content saved to:")
@@ -148,7 +148,7 @@ describe("P0-1 — failed results pass the canonical output boundary", () => {
     const { cwd, cleanup } = tempCwd()
     try {
       const data = "x".repeat(8000)
-      const capped = truncateOutput({ ok: true, data }, cwd, "bash")
+      const capped = truncateOutput({ ok: true, data }, "bash")
       expect(capped.ok).toBe(true)
       if (!capped.ok) throw new Error("unreachable")
       expect(capped.data.length).toBeLessThan(1024)
