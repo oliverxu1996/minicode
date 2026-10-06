@@ -24,6 +24,7 @@ import {
 	type RunDisplay,
 } from "../projection"
 import { FooterLineView } from "./view/footer"
+import { runCompaction } from "./compaction"
 import { Selector, type SelectorItem } from "./view/selector"
 import { MiniCodeAutocomplete } from "./input/autocomplete"
 import { expandFileReferences } from "./input/expand"
@@ -72,6 +73,12 @@ export class MiniCodeTui {
 	private readonly loader: Loader
 	private session: Session
 	private running = false
+	/**
+	 * True for exactly the lifetime of a manual `/compact`. Application-owned:
+	 * the compaction has no runtime event, so this transient drives both the
+	 * footer ("Compacting", not "Idle") and the spinner.
+	 */
+	private compacting = false
 	/** Runtime facts the footer reads, folded from the run's own events. */
 	private display: RunDisplay = NO_RUN_DISPLAY
 	private abort: AbortController | null = null
@@ -180,11 +187,33 @@ export class MiniCodeTui {
 				})
 			},
 			compact: async (): Promise<CompactResult> => {
+				// A manual compaction must not run concurrently with another
+				// compaction or an active run: both mutate the same durable history,
+				// and the run owns the shared spinner. Refuse rather than start a
+				// second mutator; the in-flight owner keeps its transient state.
+				const busy: "compacting" | "running" | undefined =
+					this.compacting ? "compacting" : this.running ? "running" : undefined
+				if (busy !== undefined) return { status: "busy", reason: busy }
 				const model = await this.options.agent.currentModel()
 				if (model === undefined) return { status: "no-model" }
 				const { Compactor } = await import("@minicode/agent")
 				const compactor = new Compactor(model, model.limits.contextWindow)
-				const outcome = await compactor.compact(this.session)
+				// `runCompaction` brackets the awaited model call; its `finally`
+				// guarantees the state and spinner are cleared on success, failure,
+				// or an unexpected throw.
+				const outcome = await runCompaction(this.session, compactor, {
+					begin: () => {
+						this.compacting = true
+						// No interrupt hint: Esc aborts a run, not a manual compaction.
+						this.showSpinner("Compacting context…")
+						this.updateFooter()
+					},
+					end: () => {
+						this.compacting = false
+						this.hideSpinner()
+						this.updateFooter()
+					},
+				})
 				if (outcome.status === "compacted") {
 					this.chat.clear()
 					this.replaySession()
@@ -387,6 +416,14 @@ export class MiniCodeTui {
 			return
 		}
 
+		if (this.compacting) {
+			// A task must not start while a manual compaction is rewriting the
+			// same history (and the compaction owns the shared spinner).
+			this.chat.addChild(notice("a compaction is in progress — wait for it to finish"))
+			this.tui.requestRender()
+			return
+		}
+
 		this.chat.addChild(userMessage(text))
 		await this.startRun(expandFileReferences(text, this.session.cwd))
 	}
@@ -584,6 +621,7 @@ export class MiniCodeTui {
 			cwd: this.session.cwd,
 			branch: this.gitBranch,
 			running: this.running,
+			compacting: this.compacting,
 			modelId: this.modelId,
 			limits: this.modelLimits,
 			compactThresholdPct: this.compactThresholdPct,

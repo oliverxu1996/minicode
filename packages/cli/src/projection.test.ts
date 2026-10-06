@@ -645,3 +645,41 @@ describe("terminal states stay distinguishable without claiming success", () => 
       .toBe("● finished")
   })
 })
+
+// ---------------------------------------------------------------------------
+// 15 — manual compaction liveness
+// ---------------------------------------------------------------------------
+
+describe("a manual compaction is visibly in progress", () => {
+  test("row 1 reports Compacting, never Idle", () => {
+    const text = row1Text({ compacting: true })
+    expect(text).toContain("Compacting")
+    expect(text).not.toContain("Idle")
+  })
+
+  test("row 2 describes the operation instead of a stale context reading", () => {
+    const text = row2Text({ compacting: true, lastCallUsage: { inputTokens: 20_000 } })
+    expect(text).toContain("Context compacting")
+    expect(text).toContain("summarizing older messages")
+    // The pre-compaction reading and any no-run line are not shown mid-compaction.
+    expect(text).not.toContain("20k/96k")
+    expect(text).not.toContain("no run yet")
+  })
+
+  test("an active run takes precedence in the tie-break (they never overlap)", () => {
+    const text = row1Text({ running: true, compacting: true })
+    expect(text).toContain("Working")
+    expect(text).not.toContain("Compacting")
+  })
+
+  test("clearing the transient returns the normal idle footer", () => {
+    expect(row1Text({ compacting: false })).toContain("Idle")
+    expect(row2Text({ compacting: false })).toContain("no run yet")
+  })
+
+  test("the compacting state is not shown once the run-summary is present", () => {
+    // Guard against a stale flag leaking into the post-run footer.
+    const text = row1Text({ compacting: false, running: false })
+    expect(text).toBe("~/project (main) · Idle · deepseek-chat · 128k window")
+  })
+})

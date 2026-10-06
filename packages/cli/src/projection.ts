@@ -152,6 +152,12 @@ export interface FooterInput {
   /** Git branch, when the workspace is a repository. */
   readonly branch: string | undefined
   readonly running: boolean
+  /**
+   * A manual `/compact` is running (application-owned transient state). The
+   * footer reports the compaction rather than a stale `Idle` reading. Absent
+   * means no manual compaction is in progress.
+   */
+  readonly compacting?: boolean
   /** Active model configuration key, when a model is resolved. */
   readonly modelId: string | undefined
   /** Limits of the model in use, when one is resolved. */
@@ -329,9 +335,11 @@ function footerRow1(input: FooterInput): FooterRow {
   }
   groups.push({ parts: cwdParts })
 
-  groups.push({
-    parts: [{ text: input.running ? "Working" : "Idle", tone: input.running ? "warn" : "ok", drop: 0 }],
-  })
+  // A run and a manual compaction never overlap, so the precedence below is
+  // only a tie-break: an active run wins, then a manual compaction, then idle.
+  const state = input.running ? "Working" : input.compacting === true ? "Compacting" : "Idle"
+  const stateTone: FooterTone = input.running || input.compacting === true ? "warn" : "ok"
+  groups.push({ parts: [{ text: state, tone: stateTone, drop: 0 }] })
 
   if (input.running) {
     groups.push({ parts: [{ text: "Esc to interrupt", tone: "dim", drop: 0 }] })
@@ -353,6 +361,23 @@ function footerRow1(input: FooterInput): FooterRow {
  * number stays truthful, and the percent is not shown as if it were ordinary.
  */
 function footerRow2(input: FooterInput): FooterRow {
+  // A manual compaction replaces the usage row: the context reading is stale
+  // while history is being rewritten, and the user needs to see the operation
+  // itself, not a number that describes the pre-compaction history.
+  if (input.compacting === true) {
+    return {
+      groups: [
+        {
+          parts: [
+            { text: "Context", tone: "warn", drop: 0 },
+            { text: "compacting", tone: "warn", drop: 0 },
+            { text: "— summarizing older messages", tone: "dim", drop: 0 },
+          ],
+        },
+      ],
+    }
+  }
+
   const groups: FooterGroup[] = []
   const context = contextDisplay(input.lastCallUsage?.inputTokens, input.limits, input.compactThresholdPct)
 

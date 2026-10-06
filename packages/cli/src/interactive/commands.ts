@@ -2,13 +2,16 @@ import type { CompactionOutcome, Session, Skill } from "@minicode/agent"
 import { trustProject } from "@minicode/agent"
 
 /**
- * Outcome of a manual `/compact`, including the case where no model is
- * configured (which the compaction layer cannot report on its own).
+ * Outcome of a manual `/compact`, including cases the compaction layer cannot
+ * report on its own: no model configured, and a compaction already in flight.
  *
- * Deliberately a union rather than a boolean: "nothing to compact" and
- * "compaction failed" must not render the same message.
+ * Deliberately a union rather than a boolean: "nothing to compact", "no model",
+ * "already running" and "compaction failed" must not render the same message.
  */
-export type CompactResult = CompactionOutcome | { readonly status: "no-model" }
+export type CompactResult =
+  | CompactionOutcome
+  | { readonly status: "no-model" }
+  | { readonly status: "busy"; readonly reason: "compacting" | "running" }
 
 /** Facade the commands act through — implemented by the TUI app. */
 export interface CommandContext {
@@ -224,6 +227,11 @@ export const COMMANDS: Command[] = [
           break
         case "no-model":
           ctx.notify("no model configured — run /login", true)
+          break
+        case "busy":
+          ctx.notify(result.reason === "running"
+            ? "a task is running — wait for it to finish before compacting"
+            : "a compaction is already in progress")
           break
       }
     },
