@@ -1,6 +1,6 @@
 import type { CompactionOutcome, Session, Skill } from "@minicode/agent"
 import { trustProject } from "@minicode/agent"
-import type { ModelConfig } from "@minicode/model"
+import type { ModelConfig, ModelProtocol } from "@minicode/model"
 
 /**
  * Outcome of a manual `/compact`, including cases the compaction layer cannot
@@ -22,8 +22,13 @@ export interface CommandContext {
   setSession(session: Session): void
   /** Shows a notice / error line in the chat. */
   notify(text: string, isError?: boolean): void
-  /** Opens an inline selector and resolves with the chosen value. */
-  pick(title: string, items: Array<{ value: string; label: string; description?: string }>): Promise<string | null>
+  /** Opens an inline selector and resolves with the chosen value.
+   *  `options.selectedValue` highlights an existing choice when it opens. */
+  pick(
+    title: string,
+    items: Array<{ value: string; label: string; description?: string }>,
+    options?: { selectedValue?: string },
+  ): Promise<string | null>
   /** Prompts for a single line of input (status-prompt style). `secret` masks
    *  the typed text so credentials are never echoed. */
   ask(label: string, options?: { secret?: boolean }): Promise<string | null>
@@ -94,6 +99,29 @@ const MODEL_ADD = "\u0000model:add"
 const MODEL_EDIT = "\u0000model:edit"
 const MODEL_REMOVE = "\u0000model:remove"
 const MODEL_CONFIGURE = "\u0000model:configure"
+/** Commit-picker actions for the wizard's final step. */
+const MODEL_COMMIT = "\u0000model:commit"
+const MODEL_LIMITS = "\u0000model:limits"
+
+/**
+ * MiniCode-managed limit defaults. The runtime needs *a* valid limit pair, not
+ * the model's true maximum (contextWindow is never sent to the provider; it
+ * only sizes MiniCode's own input/output budgets). These conservative values
+ * let a user add a model without ever thinking about token limits.
+ */
+const DEFAULT_CONTEXT_WINDOW = 128000
+const DEFAULT_MAX_OUTPUT_TOKENS = 8192
+
+/** The two wire protocols MiniCode speaks, and the official endpoint each
+ *  defaults to. Displayed as protocols, never as "providers". */
+const PROTOCOL_ITEMS: Array<{ value: string; label: string }> = [
+  { value: "openai", label: "OpenAI-compatible" },
+  { value: "anthropic", label: "Anthropic" },
+]
+const OFFICIAL_ENDPOINTS: Record<ModelProtocol, string> = {
+  openai: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com/v1",
+}
 
 /** A user-facing message derived from a thrown value. Never contains secrets:
  *  ModelError messages carry no API key (see @minicode/model). */
@@ -101,10 +129,32 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** The values the wizard collects. Identity (`id`/`name`) and persistence are
+ *  the caller's responsibility, so Add can derive an id and Edit can keep one. */
+interface ModelDraft {
+  readonly protocol: ModelProtocol
+  readonly endpoint: string
+  readonly model: string
+  readonly apiKey: string
+  readonly contextWindow: number
+  readonly maxOutputTokens: number
+}
+
 type ModelPromptResult =
-  | { readonly kind: "config"; readonly config: ModelConfig }
+  | { readonly kind: "draft"; readonly draft: ModelDraft }
   | { readonly kind: "cancelled" }
   | { readonly kind: "error"; readonly message: string }
+
+/**
+ * Derives the local configuration id from the provider model identifier, so the
+ * user is never asked for a separate internal id. Control characters are
+ * stripped (the picker reserves a control-character prefix for its own action
+ * values); a name that reduces to nothing falls back to `"model"`.
+ */
+function deriveModelId(model: string): string {
+  const cleaned = model.trim().replace(/[\u0000-\u001f\u007f]/g, "").trim()
+  return cleaned.length > 0 ? cleaned : "model"
+}
 
 /** Picker over the configured models. Returns the chosen id, or null when there
  *  are none or the user cancels. */
@@ -120,69 +170,104 @@ async function pickModelId(ctx: CommandContext, title: string): Promise<string |
 }
 
 /**
- * Runs the model-configuration prompts. `base` seeds an edit with the current
- * values; when absent the flow adds a new model. Returns a discriminated result
- * so the caller can report cancellation, validation failure, and success
- * distinctly — pressing Escape is never reported as a validation error.
+ * Runs the model-configuration wizard. `base` seeds an edit with the current
+ * values; when absent the flow adds a new model.
+ *
+ * The normal path asks only for what MiniCode cannot reliably know — protocol,
+ * endpoint, provider model, and API key. Context/output limits are MiniCode
+ * defaults, reachable only through the optional `Configure limits…` action.
+ *
+ * Returns a discriminated result so the caller can report cancellation,
+ * validation failure, and success distinctly — pressing Escape is never
+ * reported as a validation error.
  */
-async function promptModelConfig(ctx: CommandContext, base?: ModelConfig): Promise<ModelPromptResult> {
+async function promptModelDraft(ctx: CommandContext, base?: ModelConfig): Promise<ModelPromptResult> {
   const editing = base !== undefined
   const cancelled: ModelPromptResult = { kind: "cancelled" }
   const invalid = (message: string): ModelPromptResult => ({ kind: "error", message })
 
-  const protocolRaw = await ctx.ask(editing ? `protocol (default ${base.protocol}):` : "protocol — openai or anthropic:")
-  if (protocolRaw === null) return cancelled
-  const protocol = protocolRaw.trim() || (editing ? base.protocol : "")
-  if (protocol !== "openai" && protocol !== "anthropic") {
-    return invalid("protocol must be openai or anthropic")
-  }
+  const protocolChoice = await ctx.pick(
+    "Protocol",
+    PROTOCOL_ITEMS,
+    editing ? { selectedValue: base.protocol } : undefined,
+  )
+  if (protocolChoice === null) return cancelled
+  const protocol: ModelProtocol = protocolChoice === "anthropic" ? "anthropic" : "openai"
 
-  const defaultEndpoint = protocol === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com/v1"
-  const endpointDefault = editing && base.protocol === protocol ? base.endpoint : defaultEndpoint
+  // An unchanged protocol keeps a stored custom endpoint; switching protocol
+  // falls back to that protocol's official default (shown, and overridable).
+  const endpointDefault = editing && base.protocol === protocol ? base.endpoint : OFFICIAL_ENDPOINTS[protocol]
   const endpointRaw = await ctx.ask(`endpoint (default ${endpointDefault}):`)
   if (endpointRaw === null) return cancelled
   const endpoint = endpointRaw.trim() || endpointDefault
 
-  let id: string
-  if (editing) {
-    // `ModelManager.update` replaces the configuration of an existing id; the
-    // id is the identity and is not changed by an edit.
-    id = base.id
-  } else {
-    const idRaw = await ctx.ask("model id (short name used by /model):")
-    if (idRaw === null) return cancelled
-    id = idRaw.trim()
-    if (id.length === 0) return invalid("model id is required")
-  }
-
   const modelRaw = await ctx.ask(editing
-    ? `provider model name (default ${base.model}):`
-    : "provider model name (e.g. gpt-4.1 / claude-sonnet-4-5):")
+    ? `model (default ${base.model}):`
+    : "model (provider model id, e.g. gpt-5 / claude-sonnet-4-5):")
   if (modelRaw === null) return cancelled
   const model = modelRaw.trim() || (editing ? base.model : "")
-  if (model.length === 0) return invalid("provider model name is required")
+  if (model.length === 0) return invalid("model identifier is required")
 
   const apiKeyRaw = await ctx.ask(editing ? "api key (blank keeps current):" : "api key:", { secret: true })
   if (apiKeyRaw === null) return cancelled
   const apiKey = apiKeyRaw.trim().length === 0 ? (editing ? base.apiKey : "") : apiKeyRaw.trim()
 
-  const contextRaw = await ctx.ask(`context window in tokens (default ${editing ? base.contextWindow : 128000}):`)
-  if (contextRaw === null) return cancelled
-  const contextWindow = Number(contextRaw.trim()) > 0 ? Number(contextRaw.trim()) : (editing ? base.contextWindow : 128000)
+  // Limits always have a value; the user only sees them if they opt in.
+  let contextWindow = editing ? base.contextWindow : DEFAULT_CONTEXT_WINDOW
+  let maxOutputTokens = editing ? base.maxOutputTokens : DEFAULT_MAX_OUTPUT_TOKENS
 
-  const maxOutRaw = await ctx.ask(`max output tokens (default ${editing ? base.maxOutputTokens : 8192}):`)
-  if (maxOutRaw === null) return cancelled
-  const maxOutputTokens = Number(maxOutRaw.trim()) > 0 ? Number(maxOutRaw.trim()) : (editing ? base.maxOutputTokens : 8192)
+  const action = await ctx.pick(editing ? `Edit "${base.id}"` : `Add "${model}"`, [
+    { value: MODEL_COMMIT, label: editing ? "Save changes" : "Add model" },
+    { value: MODEL_LIMITS, label: "Configure limits…" },
+  ])
+  if (action === null) return cancelled
+  if (action === MODEL_LIMITS) {
+    const contextRaw = await ctx.ask(`context window (default ${contextWindow}):`)
+    if (contextRaw === null) return cancelled
+    contextWindow = Number(contextRaw.trim()) > 0 ? Number(contextRaw.trim()) : contextWindow
+    const maxOutRaw = await ctx.ask(`max output tokens (default ${maxOutputTokens}):`)
+    if (maxOutRaw === null) return cancelled
+    maxOutputTokens = Number(maxOutRaw.trim()) > 0 ? Number(maxOutRaw.trim()) : maxOutputTokens
+  }
 
-  return {
-    kind: "config",
-    config: { id, name: editing ? base.name : id, protocol, endpoint, model, apiKey, contextWindow, maxOutputTokens },
+  return { kind: "draft", draft: { protocol, endpoint, model, apiKey, contextWindow, maxOutputTokens } }
+}
+
+/**
+ * Resolves a generated id that collides with an existing model. Never invents a
+ * silent suffix: the user supplies a different local id, or cancels. Returns the
+ * accepted id, or null when the user cancels.
+ */
+async function resolveModelIdCollision(
+  ctx: CommandContext,
+  taken: string,
+  existing: ReadonlySet<string>,
+): Promise<string | null> {
+  let candidate = taken
+  while (true) {
+    const raw = await ctx.ask(`model "${candidate}" already exists — enter a different local model id:`)
+    if (raw === null) return null
+    const next = raw.trim()
+    if (next.length === 0) {
+      ctx.notify("local model id is required", true)
+      continue
+    }
+    if (next.startsWith("\u0000")) {
+      ctx.notify("invalid local model id", true)
+      continue
+    }
+    if (existing.has(next)) {
+      ctx.notify(`model "${next}" already exists`, true)
+      candidate = next
+      continue
+    }
+    return next
   }
 }
 
-/** Configures and activates a new model. */
+/** Configures and activates a new model, deriving its local id from the model. */
 async function addModel(ctx: CommandContext): Promise<void> {
-  const result = await promptModelConfig(ctx)
+  const result = await promptModelDraft(ctx)
   if (result.kind === "cancelled") {
     ctx.notify("cancelled")
     return
@@ -191,9 +276,22 @@ async function addModel(ctx: CommandContext): Promise<void> {
     ctx.notify(result.message, true)
     return
   }
+
+  const manager = await ctx.agent().modelManager()
+  const existing = new Set(manager.list().map(m => m.id))
+  let id = deriveModelId(result.draft.model)
+  if (existing.has(id)) {
+    const resolved = await resolveModelIdCollision(ctx, id, existing)
+    if (resolved === null) {
+      ctx.notify("cancelled")
+      return
+    }
+    id = resolved
+  }
+
   try {
-    await ctx.agent().configureModel(result.config)
-    ctx.notify(`model "${result.config.id}" configured and activated`)
+    await ctx.agent().configureModel({ id, name: id, ...result.draft })
+    ctx.notify(`model "${id}" configured and activated`)
   } catch (error) {
     ctx.notify(`cannot configure model: ${errorMessage(error)}`, true)
   }
@@ -206,7 +304,7 @@ async function editModel(ctx: CommandContext, id: string): Promise<void> {
     ctx.notify(`model "${id}" is not configured`, true)
     return
   }
-  const result = await promptModelConfig(ctx, base)
+  const result = await promptModelDraft(ctx, base)
   if (result.kind === "cancelled") {
     ctx.notify("cancelled")
     return
@@ -216,9 +314,10 @@ async function editModel(ctx: CommandContext, id: string): Promise<void> {
     return
   }
   try {
-    // Re-read the manager so the update is applied to the latest state.
-    ;(await ctx.agent().modelManager()).update(result.config)
-    ctx.notify(`model "${result.config.id}" updated`)
+    // Re-read the manager so the update is applied to the latest state; the
+    // existing id and name are preserved (identity is not edited).
+    ;(await ctx.agent().modelManager()).update({ id: base.id, name: base.name, ...result.draft })
+    ctx.notify(`model "${base.id}" updated`)
   } catch (error) {
     ctx.notify(`cannot update model: ${errorMessage(error)}`, true)
   }

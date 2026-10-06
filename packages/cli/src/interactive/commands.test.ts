@@ -145,10 +145,17 @@ function baseConfig(overrides: Partial<ModelConfig> = {}): ModelConfig {
   }
 }
 
+interface PickCall {
+  title: string
+  items: Array<{ value: string; label: string; description?: string }>
+  selectedValue?: string
+}
+
 interface ModelHarness {
   ctx: CommandContext
   notices: Array<{ text: string; isError: boolean }>
   asks: Array<{ label: string; secret: boolean }>
+  picks: PickCall[]
   calls: {
     configured: ModelConfig[]
     updated: ModelConfig[]
@@ -168,7 +175,7 @@ function modelHarness(options: {
   active?: string
   configs?: Record<string, ModelConfig>
   askResults?: Array<string | null>
-  pick?: (title: string, items: Array<{ value: string; label: string; description?: string }>, call: number) => string | null
+  pick?: (call: PickCall, index: number) => string | null
   failConfigure?: Error
   failUpdate?: Error
   failRemove?: Error
@@ -176,6 +183,7 @@ function modelHarness(options: {
 }): ModelHarness {
   const notices: ModelHarness["notices"] = []
   const asks: ModelHarness["asks"] = []
+  const picks: ModelHarness["picks"] = []
   const calls: ModelHarness["calls"] = { configured: [], updated: [], activated: [], removed: [] }
   const askResults = [...(options.askResults ?? [])]
   const models = options.models ?? []
@@ -218,10 +226,16 @@ function modelHarness(options: {
     notify: (text: string, isError?: boolean) => {
       notices.push({ text, isError: isError === true })
     },
-    pick: async (title: string, items: Array<{ value: string; label: string; description?: string }>) => {
+    pick: async (
+      title: string,
+      items: Array<{ value: string; label: string; description?: string }>,
+      opts?: { selectedValue?: string },
+    ) => {
+      const call: PickCall = { title, items, selectedValue: opts?.selectedValue }
+      picks.push(call)
       lastPickItems.length = 0
       lastPickItems.push(...items)
-      const result = options.pick?.(title, items, pickCall) ?? null
+      const result = options.pick?.(call, pickCall) ?? null
       pickCall += 1
       return result
     },
@@ -231,30 +245,255 @@ function modelHarness(options: {
     },
   } as unknown as CommandContext
 
-  return { ctx, notices, asks, calls, lastPickItems }
+  return { ctx, notices, asks, picks, calls, lastPickItems }
 }
 
-describe("/model management surface", () => {
-  test("no models: the picker offers Add model… and opens the add flow", async () => {
+/** Value of the first item whose label matches. */
+function byLabel(call: PickCall, label: string): string | null {
+  return call.items.find(item => item.label === label)?.value ?? null
+}
+
+/**
+ * A pick handler covering the model-management menus and the wizard's protocol
+ * and commit steps. `protocol` selects the protocol item; `limits` chooses
+ * `Configure limits…` at the commit step instead of the primary action.
+ */
+function wizard(
+  opts: { protocol?: "openai" | "anthropic"; limits?: boolean } = {},
+): (call: PickCall) => string | null {
+  return call => {
+    if (call.title === "Protocol") {
+      return byLabel(call, opts.protocol === "anthropic" ? "Anthropic" : "OpenAI-compatible")
+    }
+    if (call.title.startsWith("Add ") || call.title.startsWith("Edit ")) {
+      if (opts.limits) return byLabel(call, "Configure limits…")
+      return call.items.some(i => i.label === "Add model") ? byLabel(call, "Add model") : byLabel(call, "Save changes")
+    }
+    return null
+  }
+}
+
+describe("/model add wizard", () => {
+  test("asks only for protocol, endpoint, model, and API key; defaults the limits", async () => {
     const h = modelHarness({
       models: [],
-      askResults: ["openai", "", "fresh", "gpt-4.1", "sk-new", "", ""],
-      pick: (title, items) => {
-        expect(title).toBe("Model")
-        return items[0]!.value
+      askResults: ["", "gpt-5", "sk-new"],
+      pick: wizard(),
+    })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.calls.configured).toHaveLength(1)
+    expect(h.calls.configured[0]).toMatchObject({
+      id: "gpt-5",
+      name: "gpt-5",
+      protocol: "openai",
+      endpoint: "https://api.openai.com/v1",
+      model: "gpt-5",
+      apiKey: "sk-new",
+      contextWindow: 128000,
+      maxOutputTokens: 8192,
+    })
+    // No context-window/max-output prompt on the normal path.
+    expect(h.asks.map(a => a.label).some(l => l.includes("context window"))).toBe(false)
+    expect(h.notices.at(-1)).toEqual({ text: 'model "gpt-5" configured and activated', isError: false })
+  })
+
+  test("endpoint accepts the protocol default when left blank", async () => {
+    const h = modelHarness({ askResults: ["", "gpt-5", "sk"], pick: wizard({ protocol: "anthropic" }) })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.calls.configured[0]!.endpoint).toBe("https://api.anthropic.com/v1")
+    expect(h.calls.configured[0]!.protocol).toBe("anthropic")
+  })
+
+  test("a custom endpoint is used verbatim", async () => {
+    const h = modelHarness({ askResults: ["https://my.gateway.example/v1", "gpt-5", "sk"], pick: wizard() })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.calls.configured[0]!.endpoint).toBe("https://my.gateway.example/v1")
+  })
+
+  test("the API key prompt is masked", async () => {
+    const h = modelHarness({ askResults: ["", "gpt-5", "sk-secret"], pick: wizard() })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.asks.find(a => a.label === "api key:")?.secret).toBe(true)
+  })
+
+  test("Advanced overrides both limits and they are persisted", async () => {
+    const h = modelHarness({
+      askResults: ["", "gpt-5", "sk", "200000", "16000"],
+      pick: wizard({ limits: true }),
+    })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.calls.configured[0]).toMatchObject({ contextWindow: 200000, maxOutputTokens: 16000 })
+  })
+
+  test("accepting the Advanced defaults keeps the generated limits", async () => {
+    const h = modelHarness({
+      askResults: ["", "gpt-5", "sk", "", ""],
+      pick: wizard({ limits: true }),
+    })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.calls.configured[0]).toMatchObject({ contextWindow: 128000, maxOutputTokens: 8192 })
+  })
+
+  test("a required model identifier is enforced", async () => {
+    const h = modelHarness({ askResults: ["", ""], pick: wizard() })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.calls.configured).toEqual([])
+    expect(h.notices.at(-1)).toEqual({ text: "model identifier is required", isError: true })
+  })
+
+  test("a colliding generated id asks for a different local id instead of overwriting", async () => {
+    const h = modelHarness({
+      models: [{ id: "gpt-5" }],
+      askResults: ["", "gpt-5", "sk", "gpt-5-eu"],
+      pick: wizard(),
+    })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.calls.configured).toHaveLength(1)
+    expect(h.calls.configured[0]!.id).toBe("gpt-5-eu")
+    // The collision prompt names the clash, and the existing model is untouched.
+    expect(h.asks.some(a => a.label.includes('"gpt-5" already exists'))).toBe(true)
+  })
+
+  test("a still-colliding replacement is rejected and re-asked", async () => {
+    const h = modelHarness({
+      models: [{ id: "gpt-5" }, { id: "gpt-5-eu" }],
+      askResults: ["", "gpt-5", "sk", "gpt-5-eu", "gpt-5-eu-2"],
+      pick: wizard(),
+    })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.calls.configured[0]!.id).toBe("gpt-5-eu-2")
+  })
+
+  test("cancelling the collision prompt leaves nothing added", async () => {
+    const h = modelHarness({
+      models: [{ id: "gpt-5" }],
+      askResults: ["", "gpt-5", "sk", null],
+      pick: wizard(),
+    })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.calls.configured).toEqual([])
+    expect(h.notices.at(-1)!.text).toBe("cancelled")
+  })
+
+  test("a configureModel failure is a normal error notice", async () => {
+    const h = modelHarness({
+      askResults: ["", "gpt-5", "sk"],
+      pick: wizard(),
+      failConfigure: new Error('model id "gpt-5" is already configured'),
+    })
+    await findCommand("model")!.execute(h.ctx, "add")
+    expect(h.notices.at(-1)!.isError).toBe(true)
+    expect(h.notices.at(-1)!.text).toContain("already configured")
+  })
+
+  test("/model with no models offers an actionable Add path", async () => {
+    const h = modelHarness({
+      models: [],
+      askResults: ["", "gpt-5", "sk"],
+      pick: call => {
+        if (call.title === "Model") return byLabel(call, "Add model…")
+        return wizard()(call)
       },
     })
     await findCommand("model")!.execute(h.ctx, "")
     expect(h.calls.configured).toHaveLength(1)
-    expect(h.calls.configured[0]!.id).toBe("fresh")
-    expect(h.notices.at(-1)).toEqual({ text: 'model "fresh" configured and activated', isError: false })
+  })
+})
+
+describe("/model edit wizard", () => {
+  test("preserves id, name, endpoint, key, and limits when nothing is changed", async () => {
+    const base = baseConfig({ id: "m1", name: "My Model", endpoint: "https://custom.example/v1" })
+    const h = modelHarness({
+      models: [{ id: "m1" }],
+      active: "m1",
+      configs: { m1: base },
+      askResults: ["", "", ""],
+      pick: wizard(),
+    })
+    await findCommand("model")!.execute(h.ctx, "edit m1")
+    expect(h.calls.updated).toHaveLength(1)
+    expect(h.calls.updated[0]).toEqual(base)
+    expect(h.notices.at(-1)!.text).toBe('model "m1" updated')
   })
 
+  test("the protocol picker opens on the current protocol", async () => {
+    const base = baseConfig({ protocol: "anthropic" })
+    const h = modelHarness({
+      models: [{ id: "m1" }],
+      configs: { m1: base },
+      askResults: ["", "", ""],
+      pick: wizard({ protocol: "anthropic" }),
+    })
+    await findCommand("model")!.execute(h.ctx, "edit m1")
+    expect(h.picks.find(p => p.title === "Protocol")?.selectedValue).toBe("anthropic")
+  })
+
+  test("changing protocol falls back to the new protocol's default endpoint", async () => {
+    const base = baseConfig({ protocol: "openai", endpoint: "https://custom.example/v1" })
+    const h = modelHarness({
+      models: [{ id: "m1" }],
+      configs: { m1: base },
+      askResults: ["", "", ""], // accept the shown endpoint default
+      pick: wizard({ protocol: "anthropic" }),
+    })
+    await findCommand("model")!.execute(h.ctx, "edit m1")
+    expect(h.calls.updated[0]).toMatchObject({
+      protocol: "anthropic",
+      endpoint: "https://api.anthropic.com/v1",
+      id: "m1",
+      name: "m1",
+    })
+  })
+
+  test("overriding limits persists them while keeping identity and key", async () => {
+    const base = baseConfig({ id: "m1", name: "Keep", apiKey: "sk-keep" })
+    const h = modelHarness({
+      models: [{ id: "m1" }],
+      configs: { m1: base },
+      askResults: ["", "", "", "200000", "16000"],
+      pick: wizard({ limits: true }),
+    })
+    await findCommand("model")!.execute(h.ctx, "edit m1")
+    expect(h.calls.updated[0]).toMatchObject({
+      id: "m1",
+      name: "Keep",
+      apiKey: "sk-keep",
+      contextWindow: 200000,
+      maxOutputTokens: 16000,
+    })
+  })
+
+  test("a blank API key preserves the existing credential", async () => {
+    const base = baseConfig({ apiKey: "sk-existing" })
+    const h = modelHarness({
+      models: [{ id: "m1" }],
+      configs: { m1: base },
+      askResults: ["", "", ""],
+      pick: wizard(),
+    })
+    await findCommand("model")!.execute(h.ctx, "edit m1")
+    expect(h.calls.updated[0]!.apiKey).toBe("sk-existing")
+  })
+
+  test("a persistence failure on update is an error notice", async () => {
+    const h = modelHarness({
+      models: [{ id: "m1" }],
+      configs: { m1: baseConfig() },
+      askResults: ["", "", ""],
+      pick: wizard(),
+      failUpdate: new Error("cannot persist model configuration to /x: EACCES"),
+    })
+    await findCommand("model")!.execute(h.ctx, "edit m1")
+    expect(h.notices.at(-1)!.isError).toBe(true)
+    expect(h.notices.at(-1)!.text).toContain("cannot persist")
+  })
+})
+
+describe("/model selection and removal", () => {
   test("models exist: the picker lists them and a Configure models… action", async () => {
     const h = modelHarness({ models: [{ id: "m1" }, { id: "m2" }], active: "m1" })
     await findCommand("model")!.execute(h.ctx, "")
     expect(h.lastPickItems.map(i => i.label)).toEqual(["m1", "m2", "Configure models…"])
-    // The active model is marked.
     expect(h.lastPickItems[0]!.description).toBe("active")
     expect(h.lastPickItems[1]!.description).toBeUndefined()
   })
@@ -266,62 +505,21 @@ describe("/model management surface", () => {
     expect(h.notices.at(-1)!.text).toBe("active model: m2")
   })
 
-  test("Configure models… → Add model… runs the add flow", async () => {
-    const h = modelHarness({
-      models: [{ id: "m1" }],
-      active: "m1",
-      askResults: ["anthropic", "", "m2", "claude-sonnet-4-5", "sk-2", "200000", "16000"],
-      pick: (title, items) => {
-        if (title === "Model") return items.find(i => i.label === "Configure models…")!.value
-        if (title === "Configure models") return items.find(i => i.label === "Add model…")!.value
-        return null
-      },
-    })
-    await findCommand("model")!.execute(h.ctx, "")
-    expect(h.calls.configured).toHaveLength(1)
-    const config = h.calls.configured[0]!
-    expect(config).toMatchObject({
-      id: "m2",
-      protocol: "anthropic",
-      endpoint: "https://api.anthropic.com/v1",
-      model: "claude-sonnet-4-5",
-      apiKey: "sk-2",
-      contextWindow: 200000,
-      maxOutputTokens: 16000,
-    })
-    // The API key prompt is secret.
-    expect(h.asks.find(a => a.label === "api key:")?.secret).toBe(true)
-  })
-
-  test("Configure models… → Edit model… targets the chosen model and preserves the key on blank", async () => {
-    const base = baseConfig()
-    const h = modelHarness({
-      models: [{ id: "m1" }],
-      active: "m1",
-      configs: { m1: base },
-      askResults: ["", "", "", "", "", ""],
-      pick: (title, items) => {
-        if (title === "Model") return items.find(i => i.label === "Configure models…")!.value
-        if (title === "Configure models") return items.find(i => i.label === "Edit model…")!.value
-        if (title === "Edit model") return "m1"
-        return null
-      },
-    })
-    await findCommand("model")!.execute(h.ctx, "")
-    expect(h.calls.updated).toHaveLength(1)
-    expect(h.calls.updated[0]).toEqual(base) // unchanged defaults, key kept
-    expect(h.notices.at(-1)!.text).toBe('model "m1" updated')
+  test("direct selection by id activates it", async () => {
+    const h = modelHarness({ models: [{ id: "m1" }, { id: "m2" }], active: "m1" })
+    await findCommand("model")!.execute(h.ctx, "m2")
+    expect(h.calls.activated).toEqual(["m2"])
   })
 
   test("Configure models… → Remove model… confirms, then removes a non-active model", async () => {
     const h = modelHarness({
       models: [{ id: "m1" }, { id: "m2" }],
       active: "m1",
-      pick: (title, items) => {
-        if (title === "Model") return items.find(i => i.label === "Configure models…")!.value
-        if (title === "Configure models") return items.find(i => i.label === "Remove model…")!.value
-        if (title === "Remove model" && items.some(i => i.value === "remove")) return "remove"
-        if (title === "Remove model") return "m2"
+      pick: call => {
+        if (call.title === "Model") return byLabel(call, "Configure models…")
+        if (call.title === "Configure models") return byLabel(call, "Remove model…")
+        if (call.title === "Remove model" && call.items.some(i => i.value === "remove")) return "remove"
+        if (call.title === "Remove model") return "m2"
         return null
       },
     })
@@ -335,8 +533,8 @@ describe("/model management surface", () => {
     const h = modelHarness({
       models: [{ id: "m1" }, { id: "m2" }],
       active: "m1",
-      pick: (title, items) => {
-        if (title === "Remove model" && items.some(i => i.value === "cancel")) return "cancel"
+      pick: call => {
+        if (call.title === "Remove model" && call.items.some(i => i.value === "cancel")) return "cancel"
         return null
       },
     })
@@ -349,9 +547,9 @@ describe("/model management surface", () => {
     const h = modelHarness({
       models: [{ id: "m1" }, { id: "m2" }],
       active: "m1",
-      pick: (title, items) => {
-        if (title === "Remove model" && items.some(i => i.value === "remove")) return "remove"
-        if (title === "Activate model") return "m2"
+      pick: call => {
+        if (call.title === "Remove model" && call.items.some(i => i.value === "remove")) return "remove"
+        if (call.title === "Activate model") return "m2"
         return null
       },
     })
@@ -365,9 +563,9 @@ describe("/model management surface", () => {
     const h = modelHarness({
       models: [{ id: "m1" }, { id: "m2" }],
       active: "m1",
-      pick: (title, items) => {
-        if (title === "Remove model" && items.some(i => i.value === "remove")) return "remove"
-        return null // cancel the replacement choice
+      pick: call => {
+        if (call.title === "Remove model" && call.items.some(i => i.value === "remove")) return "remove"
+        return null
       },
     })
     await findCommand("model")!.execute(h.ctx, "remove m1")
@@ -379,8 +577,8 @@ describe("/model management surface", () => {
     const h = modelHarness({
       models: [{ id: "m1" }],
       active: "m1",
-      pick: (title, items) => {
-        if (title === "Remove model" && items.some(i => i.value === "remove")) return "remove"
+      pick: call => {
+        if (call.title === "Remove model" && call.items.some(i => i.value === "remove")) return "remove"
         return null
       },
     })
@@ -389,104 +587,48 @@ describe("/model management surface", () => {
     expect(h.calls.activated).toEqual([])
     expect(h.notices.at(-1)!.text).toBe('removed model "m1"')
   })
-
-  test("direct selection by id activates it", async () => {
-    const h = modelHarness({ models: [{ id: "m1" }, { id: "m2" }], active: "m1" })
-    await findCommand("model")!.execute(h.ctx, "m2")
-    expect(h.calls.activated).toEqual(["m2"])
-  })
 })
 
-describe("/model error paths", () => {
-  test("cancelling the add flow reports cancellation, not an invalid protocol", async () => {
-    const h = modelHarness({ askResults: [null] })
-    await findCommand("model")!.execute(h.ctx, "add")
-    expect(h.calls.configured).toEqual([])
-    expect(h.notices.at(-1)).toEqual({ text: "cancelled", isError: false })
-  })
-
-  test("cancelling mid-flow (at the secret key) is reported as cancellation", async () => {
-    const h = modelHarness({ askResults: ["openai", "", "newid", "gpt-4.1", null] })
-    await findCommand("model")!.execute(h.ctx, "add")
-    expect(h.calls.configured).toEqual([])
-    expect(h.notices.at(-1)).toEqual({ text: "cancelled", isError: false })
-  })
-
-  test("an invalid configuration from the store is an error notice", async () => {
-    const h = modelHarness({
-      askResults: ["openai", "not-a-url", "newid", "gpt-4.1", "sk", "", ""],
-      failConfigure: new Error("model configuration.endpoint must be a valid URL"),
+describe("wizard cancellation", () => {
+  for (const [name, cancelAt, asks] of [
+    ["protocol", "protocol", []],
+    ["endpoint", "endpoint", [null]],
+    ["model", "model", ["", null]],
+    ["api key", "api key", ["", "gpt-5", null]],
+    ["commit", "commit", ["", "gpt-5", "sk"]],
+  ] as const) {
+    test(`Escape at the ${name} step cancels without persisting`, async () => {
+      const h = modelHarness({
+        askResults: [...asks],
+        pick: call => {
+          if (call.title === "Protocol") return cancelAt === "protocol" ? null : byLabel(call, "OpenAI-compatible")
+          if (call.title.startsWith("Add ")) return cancelAt === "commit" ? null : byLabel(call, "Add model")
+          return null
+        },
+      })
+      await findCommand("model")!.execute(h.ctx, "add")
+      expect(h.calls.configured).toEqual([])
+      expect(h.notices.at(-1)).toEqual({ text: "cancelled", isError: false })
     })
-    await findCommand("model")!.execute(h.ctx, "add")
-    expect(h.notices.at(-1)!.isError).toBe(true)
-    expect(h.notices.at(-1)!.text).toContain("must be a valid URL")
-  })
-
-  test("an invalid protocol is a validation error", async () => {
-    const h = modelHarness({ askResults: ["gemini"] })
-    await findCommand("model")!.execute(h.ctx, "add")
-    expect(h.notices.at(-1)).toEqual({ text: "protocol must be openai or anthropic", isError: true })
-  })
-
-  test("a duplicate id becomes an error notice, not a throw", async () => {
-    const h = modelHarness({
-      askResults: ["openai", "", "m1", "gpt-4.1", "sk", "", ""],
-      failConfigure: new Error('model id "m1" is already configured'),
-    })
-    await findCommand("model")!.execute(h.ctx, "add")
-    expect(h.notices.at(-1)!.isError).toBe(true)
-    expect(h.notices.at(-1)!.text).toContain("already configured")
-  })
-
-  test("editing an unknown id is an error notice", async () => {
-    const h = modelHarness({ models: [{ id: "m1" }], configs: {} })
-    await findCommand("model")!.execute(h.ctx, "edit ghost")
-    expect(h.notices.at(-1)).toEqual({ text: 'model "ghost" is not configured', isError: true })
-  })
-
-  test("removing an unknown id is an error notice", async () => {
-    const h = modelHarness({ models: [{ id: "m1" }] })
-    await findCommand("model")!.execute(h.ctx, "remove ghost")
-    expect(h.notices.at(-1)).toEqual({ text: 'model "ghost" is not configured', isError: true })
-  })
-
-  test("a persistence failure on update is an error notice", async () => {
-    const h = modelHarness({
-      models: [{ id: "m1" }],
-      configs: { m1: baseConfig() },
-      askResults: ["", "", "", "", "", ""],
-      failUpdate: new Error("cannot persist model configuration to /x: EACCES"),
-    })
-    await findCommand("model")!.execute(h.ctx, "edit m1")
-    expect(h.notices.at(-1)!.isError).toBe(true)
-    expect(h.notices.at(-1)!.text).toContain("cannot persist")
-  })
-
-  test("missing direct-command arguments produce usage errors", async () => {
-    for (const args of ["edit", "remove"]) {
-      const h = modelHarness({ models: [{ id: "m1" }] })
-      await findCommand("model")!.execute(h.ctx, args)
-      expect(h.notices.at(-1)!.isError).toBe(true)
-      expect(h.notices.at(-1)!.text).toContain(`usage: /model ${args}`)
-    }
-  })
+  }
 })
 
 describe("compatibility aliases", () => {
   test("/login maps to the add flow and announces the deprecation", async () => {
-    const h = modelHarness({ askResults: ["openai", "", "m1", "gpt-4.1", "sk", "", ""] })
+    const h = modelHarness({ askResults: ["", "gpt-5", "sk"], pick: wizard() })
     await findCommand("login")!.execute(h.ctx, "")
     expect(h.notices[0]).toEqual({ text: "login is deprecated — use /model add", isError: false })
     expect(h.calls.configured).toHaveLength(1)
+    expect(h.calls.configured[0]!.id).toBe("gpt-5")
   })
 
   test("/logout maps to the remove flow and announces the deprecation", async () => {
     const h = modelHarness({
       models: [{ id: "m1" }, { id: "m2" }],
       active: "m1",
-      pick: (title, items) => {
-        if (title === "Remove model" && !items.some(i => i.value === "remove")) return "m2"
-        if (title === "Remove model") return "remove"
+      pick: call => {
+        if (call.title === "Remove model" && !call.items.some(i => i.value === "remove")) return "m2"
+        if (call.title === "Remove model") return "remove"
         return null
       },
     })

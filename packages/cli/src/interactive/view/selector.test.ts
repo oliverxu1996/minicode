@@ -69,20 +69,45 @@ describe("Selector interaction", () => {
 		expect(selected).toBe("two")
 	})
 
-	test("Escape cancels without selecting", () => {
-		const selector = new Selector("Select model", items())
-		let selected: string | undefined
-		let cancelled = false
-		selector.onSelect = value => {
-			selected = value
-		}
-		selector.onCancel = () => {
-			cancelled = true
-		}
-		selector.handleInput("\x1b")
-		expect(cancelled).toBe(true)
-		expect(selected).toBeUndefined()
-	})
+  test("Escape cancels without selecting", () => {
+    const selector = new Selector("Select model", items())
+    let selected: string | undefined
+    let cancelled = false
+    selector.onSelect = value => {
+      selected = value
+    }
+    selector.onCancel = () => {
+      cancelled = true
+    }
+    selector.handleInput("\x1b")
+    expect(cancelled).toBe(true)
+    expect(selected).toBeUndefined()
+  })
+
+  test("selectedValue highlights an existing choice when the picker opens", () => {
+    const picker = new Selector(
+      "Protocol",
+      [{ value: "openai", label: "OpenAI-compatible" }, { value: "anthropic", label: "Anthropic" }],
+      "anthropic",
+    )
+    let selected: string | undefined
+    picker.onSelect = value => {
+      selected = value
+    }
+    // Enter confirms the pre-highlighted item, not the first.
+    picker.handleInput("\r")
+    expect(selected).toBe("anthropic")
+  })
+
+  test("an unknown selectedValue falls back to the first item", () => {
+    const picker = new Selector("Protocol", [{ value: "openai", label: "A" }, { value: "anthropic", label: "B" }], "ghost")
+    let selected: string | undefined
+    picker.onSelect = value => {
+      selected = value
+    }
+    picker.handleInput("\r")
+    expect(selected).toBe("openai")
+  })
 })
 
 describe("Selector windowing", () => {

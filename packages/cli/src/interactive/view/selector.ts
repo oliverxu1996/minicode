@@ -45,7 +45,14 @@ export class Selector implements Component {
   constructor(
     readonly title: string,
     private readonly items: SelectorItem[],
+    /** Value highlighted when the picker opens; used to show a current
+     *  selection (e.g. the protocol being edited). Falls back to the first. */
+    selectedValue?: string,
   ) {
+    if (selectedValue !== undefined) {
+      const index = items.findIndex(item => item.value === selectedValue)
+      if (index >= 0) this.index = index
+    }
     this.panel.addChild(this.container)
     this.rebuild()
   }

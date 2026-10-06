@@ -164,10 +164,11 @@ export class MiniCodeTui {
 				this.chat.addChild(isError === true ? errorNotice(text) : notice(text))
 				this.tui.requestRender()
 			},
-			pick: async (title, items) => {
+			pick: async (title, items, options) => {
 				const selector = new Selector(
 					title,
 					items as SelectorItem[],
+					options?.selectedValue,
 				)
 				return new Promise<string | null>(resolve => {
 					// The selector fills the bottom-attached picker slot so it owns

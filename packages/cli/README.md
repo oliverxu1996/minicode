@@ -16,8 +16,9 @@ minicode
 ```
 
 On first launch no model is configured — use `/model` to set one up
-(protocol `openai` or `anthropic`, endpoint, model name, API key, token
-limits), then type a task. `/model` also adds, edits, and removes models.
+(protocol `openai` or `anthropic`, endpoint, model name, API key), then type a
+task. `/model` also adds, edits, and removes models; context/output limits are
+defaulted and only exposed under an optional *Configure limits…* step.
 
 ## Scripting
 

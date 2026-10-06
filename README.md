@@ -91,7 +91,7 @@ bun install
 bun ./packages/cli/src/main.ts /path/to/your/project
 ```
 
-On first launch no model is configured. Use `/model` to set one up — MiniCode asks for the protocol (`openai` or `anthropic`), the endpoint, a provider model name, your API key, and token limits. The configuration is saved locally, and you can switch models later with `/model` or Ctrl+P.
+On first launch no model is configured. Use `/model` to set one up — MiniCode asks for the protocol (`openai` or `anthropic`), the endpoint, a provider model name, and your API key. Context and output limits are given sensible defaults, with an optional *Configure limits…* step if you need to change them. The configuration is saved locally, and you can switch models later with `/model` or Ctrl+P.
 
 Then type a task, press Enter, and watch it work.
 
@@ -109,7 +109,7 @@ Model-related commands:
 | Command | Purpose |
 | --- | --- |
 | `/model` | Select the active model, or open `Configure models…` to add, edit, or remove one |
-| `/model add` | Configure a new model interactively |
+| `/model add` | Configure a new model (protocol, endpoint, model, API key; limits optional) |
 | `/model edit <id>` | Edit a configured model |
 | `/model remove <id>` | Remove a configured model |
 | Ctrl+P | Cycle through configured models |
