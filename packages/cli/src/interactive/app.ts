@@ -18,12 +18,12 @@ import { ansi, markdownTheme } from "./view/theme"
 import {
 	NO_RUN_DISPLAY,
 	compactionNoticeText,
-	footerSegments,
+	footerRows,
 	reduceRunDisplay,
 	runSummaryLines,
-	type FooterSegment,
 	type RunDisplay,
 } from "../projection"
+import { FooterLineView } from "./view/footer"
 import { Selector, type SelectorItem } from "./view/selector"
 import { MiniCodeAutocomplete } from "./input/autocomplete"
 import { expandFileReferences } from "./input/expand"
@@ -38,18 +38,6 @@ import {
 } from "./view/components"
 
 
-
-/** Applies a footer segment's tone. The projection decides meaning, not color. */
-function toneFor(segment: FooterSegment): string {
-	switch (segment.tone) {
-		case "warn":
-			return ansi.yellow(segment.text)
-		case "ok":
-			return ansi.green(segment.text)
-		case "dim":
-			return ansi.gray(segment.text)
-	}
-}
 
 export interface MiniCodeTuiOptions {
 	agent: MiniCode
@@ -78,7 +66,8 @@ export class MiniCodeTui {
 	private readonly chat = new Container()
 	private readonly status = new Container()
 	private readonly editor: Editor
-	private readonly footer = new Text("", 1, 0)
+	private readonly footerRow1 = new FooterLineView()
+	private readonly footerRow2 = new FooterLineView()
 
 	private readonly loader: Loader
 	private session: Session
@@ -88,6 +77,7 @@ export class MiniCodeTui {
 	private abort: AbortController | null = null
 	private lastCtrlC = 0
 	private toolsExpanded = false
+	private modelId: string | undefined
 	private modelLimits: ModelLimits | undefined
 	private compactThresholdPct: number | undefined
 	private gitBranch: string | undefined
@@ -117,7 +107,8 @@ export class MiniCodeTui {
 		this.tui.addChild(this.status)
 		this.editor = this.createEditor()
 		this.tui.addChild(this.editor)
-		this.tui.addChild(this.footer)
+		this.tui.addChild(this.footerRow1)
+		this.tui.addChild(this.footerRow2)
 
 		this.loader = new Loader(this.tui, ansi.cyan, (text) => ansi.bold(text), "working… (esc to interrupt)")
 		this.tui.addInputListener(data => this.handleGlobalInput(data))
@@ -139,7 +130,9 @@ export class MiniCodeTui {
 				this.pendingTools.clear()
 				this.replaySession()
 				this.refreshTemplates()
-				this.updateFooter()
+				// A resumed/forked session may live in another workspace, so the
+				// footer's branch (and model) are re-read, not carried over.
+				void this.refreshFooterData()
 				this.tui.requestRender()
 			},
 			notify: (text, isError) => {
@@ -195,6 +188,10 @@ export class MiniCodeTui {
 				if (outcome.status === "compacted") {
 					this.chat.clear()
 					this.replaySession()
+					// Manual compaction is not a runtime event; record its message
+					// count here so the footer reports it like an automatic one.
+					this.display = { ...this.display, compactedMessages: outcome.removed }
+					this.updateFooter()
 					this.tui.requestRender()
 				}
 				return outcome
@@ -329,7 +326,8 @@ export class MiniCodeTui {
 		const next = models[(index + 1) % models.length]!
 		this.options.agent.activateModel(next.id)
 		this.chat.addChild(notice(`switched model: ${next.id}`))
-		this.updateFooter()
+		// The footer's model identity and window must follow the switch.
+		await this.refreshFooterData()
 		this.tui.requestRender()
 	}
 
@@ -361,6 +359,9 @@ export class MiniCodeTui {
 			const command = findCommand(name)
 			if (command !== undefined) {
 				await command.execute(this.commandContext, args)
+				// A command may change the active model (e.g. /model, /login), so
+				// the footer's model identity and window are re-read here.
+				await this.refreshFooterData()
 				this.tui.requestRender()
 				return
 			}
@@ -460,7 +461,7 @@ export class MiniCodeTui {
 			case "run_start":
 				break
 			case "iteration_start":
-				this.loader.setMessage(`step ${event.iteration}… (esc to interrupt)`)
+				this.loader.setMessage("working… (esc to interrupt)")
 				this.updateFooter()
 				break
 			case "assistant_delta": {
@@ -541,9 +542,8 @@ export class MiniCodeTui {
 
 				// The runtime's own record, rendered as sent — no value here is
 				// recomputed, and the record itself states how the run ended. The
-				// step counter is deliberately left as it is: the summary reports
-				// the authoritative model-call count, and the display resets when
-				// the next run starts.
+				// summary reports the authoritative model-call count; the footer's
+				// live run figures reset when the next run starts.
 				for (const line of runSummaryLines(event.run)) {
 					this.chat.addChild(notice(line))
 				}
@@ -580,17 +580,21 @@ export class MiniCodeTui {
 	}
 
 	private updateFooter(): void {
-		const segments = footerSegments({
+		const lines = footerRows({
 			cwd: this.session.cwd,
 			branch: this.gitBranch,
-			lastCallUsage: this.display.lastCallUsage,
-			runUsage: this.display.runUsage,
+			running: this.running,
+			modelId: this.modelId,
 			limits: this.modelLimits,
 			compactThresholdPct: this.compactThresholdPct,
-			running: this.running,
-			step: this.display.step,
+			lastCallUsage: this.display.lastCallUsage,
+			runRequests: this.display.runRequests,
+			runUsage: this.display.runUsage,
+			lastRun: this.display.lastRun,
+			compactedMessages: this.display.compactedMessages,
 		})
-		this.footer.setText(segments.map(toneFor).join(ansi.gray("  ·  ")))
+		this.footerRow1.setRow(lines.row1)
+		this.footerRow2.setRow(lines.row2)
 		this.tui.requestRender()
 	}
 
@@ -598,6 +602,7 @@ export class MiniCodeTui {
 		// Re-read per run and on every model switch: the footer must describe
 		// the model actually in use, never a previous one.
 		const model = await this.options.agent.currentModel()
+		this.modelId = model?.id
 		this.modelLimits = model?.limits
 		try {
 			this.compactThresholdPct = loadSettings(this.session.cwd).settings.autoCompact?.thresholdPct
