@@ -79,7 +79,16 @@ export class Session {
     return this._status
   }
   updatedAt: number
-  readonly messages: SessionMessage[] = []
+  /**
+   * The durable conversation history. Owned by Session: it is mutated only
+   * through Session's own append/rewrite/recovery operations. Exposed as a
+   * read-only view so a caller cannot change durable history by mutating the
+   * collection or a message returned from it.
+   */
+  private _messages: SessionMessage[] = []
+  get messages(): readonly SessionMessage[] {
+    return this._messages
+  }
   /**
    * Every run this session has executed, oldest first. A run is appended when
    * it starts and replaced with its completed form when it ends, so a run
@@ -144,7 +153,7 @@ export class Session {
     session.updatedAt = typeof json.updatedAt === "number" ? json.updatedAt : 0
     if (typeof json.title === "string" && json.title.trim().length > 0) session.title = json.title
     if (typeof json.parentSessionId === "string") session.parentSessionId = json.parentSessionId
-    session.messages.push(...parseMessages(json.messages))
+    session._messages.push(...parseMessages(json.messages))
     session._runs.push(...parseRuns(json.runs))
     session.ledger.replaceAll(ToolLedger.fromJSON(json.ledger as never))
 
@@ -169,7 +178,7 @@ export class Session {
       parentSessionId: this.parentSessionId,
       runs: this._runs,
       ledger: this.ledger.toJSON(),
-      messages: this.messages,
+      messages: this._messages,
     }
   }
 
@@ -264,7 +273,7 @@ export class Session {
       status: "complete",
       timestamp: Date.now(),
     }
-    this.messages.push(msg)
+    this._messages.push(msg)
     return msg as SessionMessage & { role: "user" }
   }
 
@@ -281,7 +290,7 @@ export class Session {
       timestamp: Date.now(),
       finishReason: meta.finishReason,
     }
-    this.messages.push(msg)
+    this._messages.push(msg)
     return msg as SessionMessage & { role: "assistant" }
   }
 
@@ -290,8 +299,8 @@ export class Session {
    *  results are appended per call, so a crash mid-execution leaves the
    *  durable history recoverable (see recover()). */
   toolResultMessageFor(assistantMsg: SessionMessage & { role: "assistant" }): SessionMessage & { role: "tool" } {
-    const idx = this.messages.indexOf(assistantMsg)
-    const next = this.messages[idx + 1]
+    const idx = this._messages.indexOf(assistantMsg)
+    const next = this._messages[idx + 1]
     if (next !== undefined && next.role === "tool") {
       return next as SessionMessage & { role: "tool" }
     }
@@ -302,7 +311,7 @@ export class Session {
       status: "complete",
       timestamp: Date.now(),
     }
-    this.messages.splice(idx + 1, 0, msg)
+    this._messages.splice(idx + 1, 0, msg)
     return msg as SessionMessage & { role: "tool" }
   }
 
@@ -333,7 +342,7 @@ export class Session {
 
   /** Finds the tool result recorded for a toolCallId, if any. */
   findToolResult(toolCallId: string): ModelToolResult | undefined {
-    for (const msg of this.messages) {
+    for (const msg of this._messages) {
       if (msg.role !== "tool") continue
       const found = msg.content.find(r => r.toolCallId === toolCallId)
       if (found) return found
@@ -342,8 +351,8 @@ export class Session {
   }
 
   lastAssistant(): (SessionMessage & { role: "assistant" }) | undefined {
-    for (let i = this.messages.length - 1; i >= 0; i--) {
-      const msg = this.messages[i]
+    for (let i = this._messages.length - 1; i >= 0; i--) {
+      const msg = this._messages[i]
       if (msg.role === "assistant") return msg as SessionMessage & { role: "assistant" }
       if (msg.role === "user") return undefined
     }
@@ -379,7 +388,7 @@ export class Session {
    */
   toRequestMessages(context?: PruneContext): ModelMessage[] {
     return pruneOldToolOutputs(
-      this.messages.map(
+      this._messages.map(
         m =>
           ({
             role: m.role,
@@ -408,17 +417,20 @@ export class Session {
    * run are ephemeral runtime state whose durability is the Run's business,
    * ordered around its recovery contract. Only this wholesale rewrite — which
    * no run path performs for durability reasons — persists itself.
+   *
+   * The candidate history is validated before anything is mutated: an invalid
+   * replacement throws and leaves the existing history and the on-disk snapshot
+   * untouched. A valid replacement is swapped in atomically, then checkpointed.
    */
-  async replaceMessages(messages: ModelMessage[]): Promise<void> {
-    this.messages.length = 0
-    for (const message of messages) {
-      this.messages.push({
-        id: crypto.randomUUID(),
-        ...message,
-        status: "complete",
-        timestamp: Date.now(),
-      } as SessionMessage)
-    }
+  async replaceMessages(messages: readonly ModelMessage[]): Promise<void> {
+    validateReplacementHistory(messages)
+    const next: SessionMessage[] = messages.map(message => ({
+      id: crypto.randomUUID(),
+      ...message,
+      status: "complete",
+      timestamp: Date.now(),
+    } as SessionMessage))
+    this._messages = next
     await this.checkpoint()
   }
 
@@ -462,7 +474,7 @@ export class Session {
 
     // 2. Dangling tool-call parts: a call in history with no result and no
     //    ledger entry is an unknown outcome.
-    for (const msg of this.messages) {
+    for (const msg of this._messages) {
       if (msg.role !== "assistant") continue
       for (const part of msg.content) {
         if (part.type !== "tool_call") continue
@@ -481,7 +493,10 @@ export class Session {
       if (entry.status !== "pending") continue
       const assistantMsg = this.findAssistantWithCall(entry.toolCallId)
       if (assistantMsg !== undefined && hooks?.executeTool !== undefined) {
-        await hooks.executeTool(this, assistantMsg, entry.name, entry.toolCallId, entry.input, { reissue: true })
+        // The ledger entry exposes a read-only `input`; hand execution its own
+        // mutable copy so the reissue path keeps its `Record` contract without
+        // the ledger handing out a mutable reference.
+        await hooks.executeTool(this, assistantMsg, entry.name, entry.toolCallId, { ...entry.input }, { reissue: true })
         report.reissued.push({ toolCallId: entry.toolCallId, name: entry.name })
       } else {
         // Orphaned entry — finalize defensively.
@@ -525,7 +540,7 @@ export class Session {
   }
 
   private findAssistantWithCall(toolCallId: string): (SessionMessage & { role: "assistant" }) | undefined {
-    for (const msg of this.messages) {
+    for (const msg of this._messages) {
       if (msg.role !== "assistant") continue
       if (msg.content.some(p => p.type === "tool_call" && p.toolCallId === toolCallId)) {
         return msg as SessionMessage & { role: "assistant" }
@@ -550,6 +565,109 @@ function parseMessages(input: unknown): SessionMessage[] {
     } as SessionMessage)
   }
   return out
+}
+
+/**
+ * Validates a candidate history for {@link Session.replaceMessages}.
+ *
+ * `replaceMessages` is the durable rewrite door used by compaction, fork,
+ * clone and `/import`. It accepts `ModelMessage[]`, a shape that admits roles
+ * and payloads the durable format cannot faithfully represent (the loader's
+ * `parseMessages` silently drops any role but user/assistant/tool). Anything
+ * accepted here must round-trip through `toJSON`/`fromJSON` unchanged, so the
+ * rules below reject exactly what the durable format cannot carry:
+ *
+ *  - roles must be one of `user`, `assistant`, `tool`;
+ *  - each message must have the declared shape for its role (string user
+ *    content; assistant parts; tool results with a known output kind);
+ *  - a tool call/result `toolCallId` must be a non-empty string;
+ *  - one `toolCallId` may have at most one durable result.
+ *
+ * A dangling assistant tool call (no result) is deliberately valid: interrupted
+ * and steered runs leave exactly that, and `recover` reconciles it. Validation
+ * therefore never requires a call to have a result.
+ *
+ * Throws before any mutation; callers must treat a throw as "nothing changed".
+ */
+function validateReplacementHistory(messages: readonly ModelMessage[]): void {
+  const seenResultIds = new Set<string>()
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i] as { role?: unknown } | null | undefined
+    if (typeof message !== "object" || message === null) {
+      throw new Error(`replaceMessages: message ${i} is not an object`)
+    }
+    if (message.role === "user") {
+      if (typeof (message as { content?: unknown }).content !== "string") {
+        throw new Error(`replaceMessages: user message ${i} content must be a string`)
+      }
+      continue
+    }
+    if (message.role === "assistant") {
+      const content = (message as { content?: unknown }).content
+      // A plain string is the transcript form `/import` accepts and the
+      // durable loader preserves verbatim; parts are the runtime form.
+      if (typeof content === "string") continue
+      if (!Array.isArray(content)) {
+        throw new Error(`replaceMessages: assistant message ${i} content must be a string or an array of parts`)
+      }
+      content.forEach((raw, p) => {
+        const part = raw as { type?: unknown; text?: unknown; toolCallId?: unknown; toolName?: unknown } | null
+        if (part === null || typeof part !== "object") {
+          throw new Error(`replaceMessages: assistant message ${i} part ${p} is not an object`)
+        }
+        if (part.type === "text") {
+          if (typeof part.text !== "string") {
+            throw new Error(`replaceMessages: assistant message ${i} text part ${p} needs a string text`)
+          }
+        } else if (part.type === "tool_call") {
+          if (typeof part.toolCallId !== "string" || part.toolCallId.length === 0) {
+            throw new Error(`replaceMessages: assistant message ${i} tool call ${p} needs a non-empty toolCallId`)
+          }
+          if (typeof part.toolName !== "string") {
+            throw new Error(`replaceMessages: assistant message ${i} tool call ${p} needs a toolName`)
+          }
+        } else {
+          throw new Error(`replaceMessages: assistant message ${i} part ${p} has an unsupported type`)
+        }
+      })
+      continue
+    }
+    if (message.role === "tool") {
+      const content = (message as { content?: unknown }).content
+      if (!Array.isArray(content)) {
+        throw new Error(`replaceMessages: tool message ${i} content must be an array`)
+      }
+      content.forEach((raw, r) => {
+        const result = raw as { toolCallId?: unknown; toolName?: unknown; output?: unknown } | null
+        if (result === null || typeof result !== "object") {
+          throw new Error(`replaceMessages: tool message ${i} result ${r} is not an object`)
+        }
+        if (typeof result.toolCallId !== "string" || result.toolCallId.length === 0) {
+          throw new Error(`replaceMessages: tool message ${i} result ${r} needs a non-empty toolCallId`)
+        }
+        if (seenResultIds.has(result.toolCallId)) {
+          throw new Error(`replaceMessages: duplicate tool result for toolCallId ${result.toolCallId}`)
+        }
+        seenResultIds.add(result.toolCallId)
+        if (typeof result.toolName !== "string") {
+          throw new Error(`replaceMessages: tool message ${i} result ${r} needs a toolName`)
+        }
+        const output = result.output as { type?: unknown; text?: unknown } | null | undefined
+        if (output === null || typeof output !== "object") {
+          throw new Error(`replaceMessages: tool message ${i} result ${r} needs an output`)
+        }
+        if (output.type === "text" || output.type === "tool_error") {
+          if (typeof output.text !== "string") {
+            throw new Error(`replaceMessages: tool message ${i} result ${r} ${output.type} output needs a string text`)
+          }
+        } else if (output.type !== "json") {
+          throw new Error(`replaceMessages: tool message ${i} result ${r} has an unsupported output type`)
+        }
+      })
+      continue
+    }
+    throw new Error(`replaceMessages: message ${i} has unsupported durable role ${String(message.role)}`)
+  }
 }
 
 /** Parses persisted run records; anything malformed is skipped rather than

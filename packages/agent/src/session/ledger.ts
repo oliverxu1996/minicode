@@ -1,6 +1,29 @@
 export type ToolLedgerStatus = "pending" | "running" | "succeeded" | "failed"
 
+/**
+ * Public, read-only view of one ledger entry.
+ *
+ * The ledger owns the entry's state; callers may inspect it but must not
+ * mutate it. Every field is `readonly`, and `input` is a read-only record, so
+ * the durable state cannot be changed by reaching through this view — including
+ * the nested `input` object, which is the same object referenced by the
+ * assistant tool-call part it describes.
+ *
+ * The mutable backing shape is internal to {@link ToolLedger}; see
+ * `MutableToolLedgerEntry`.
+ */
 export interface ToolLedgerEntry {
+  readonly toolCallId: string
+  readonly name: string
+  readonly input: Readonly<Record<string, unknown>>
+  readonly status: ToolLedgerStatus
+  readonly startedAt?: number
+  readonly finishedAt?: number
+  readonly note?: string
+}
+
+/** Internal mutable storage. Never escapes the ledger. */
+interface MutableToolLedgerEntry {
   toolCallId: string
   name: string
   input: Record<string, unknown>
@@ -40,11 +63,17 @@ export function toolDurationMs(entry: ToolLedgerEntry): number | undefined {
  * a tool must not execute until its `pending` entry is durably persisted,
  * and the result must not be recorded before the entry is `running`.
  *
+ * Mutation is owned by this class: `pending`, `running`, `finished`, `reissue`
+ * and `replaceAll` are the only ways to change state. `all` and `get` expose
+ * read-only views, so no caller can mutate the collection or an entry — nor an
+ * entry's nested `input` — through the public API.
+ *
  */
 export class ToolLedger {
-  private entries: ToolLedgerEntry[] = []
+  private entries: MutableToolLedgerEntry[] = []
 
-  get all(): ToolLedgerEntry[] {
+  /** Read-only view of every entry, in insertion order. */
+  get all(): readonly ToolLedgerEntry[] {
     return this.entries
   }
 
@@ -105,6 +134,7 @@ export class ToolLedger {
     if (meta.note !== undefined) entry.note = meta.note
   }
 
+  /** Read-only view of one entry, or undefined when absent. */
   get(toolCallId: string): ToolLedgerEntry | undefined {
     return this.entries.find(e => e.toolCallId === toolCallId)
   }
@@ -119,18 +149,22 @@ export class ToolLedger {
     return this.entries.map(e => ({ ...e }))
   }
 
-  static fromJSON(entries: ToolLedgerEntry[] | undefined | null): ToolLedger {
+  static fromJSON(entries: readonly ToolLedgerEntry[] | undefined | null): ToolLedger {
     const ledger = new ToolLedger()
     ledger.entries = (entries ?? []).map(e => ({ ...e, input: { ...(e.input ?? {}) } }))
     return ledger
   }
 
-  /** Replaces all entries (used when loading a persisted ledger). */
+  /** Replaces all entries (used when loading a persisted ledger).
+   *
+   *  Entries are copied rather than adopted by reference: adopting would alias
+   *  the source ledger's internal collection, letting a caller who still holds
+   *  that ledger mutate this one through its own transition methods. */
   replaceAll(ledger: ToolLedger): void {
-    this.entries = ledger.entries
+    this.entries = ledger.entries.map(e => ({ ...e, input: { ...e.input } }))
   }
 
-  private require(toolCallId: string): ToolLedgerEntry {
+  private require(toolCallId: string): MutableToolLedgerEntry {
     const entry = this.entries.find(e => e.toolCallId === toolCallId)
     if (!entry) throw new Error(`ToolLedger: no entry for toolCallId ${toolCallId}`)
     return entry

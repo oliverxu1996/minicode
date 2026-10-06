@@ -28,7 +28,9 @@ export type SessionMessageStatus = "complete"
 export interface BaseMessage {
   readonly id: string
   readonly timestamp: number
-  status: SessionMessageStatus
+  /** Set at construction; never reassigned. Read-only so external holders of
+   *  `Session.messages` cannot mutate durable history through a message. */
+  readonly status: SessionMessageStatus
 }
 
 export interface UserMessage extends BaseMessage {
@@ -40,7 +42,7 @@ export interface AssistantMessage extends BaseMessage {
   readonly role: "assistant"
   readonly content: readonly ModelAssistantPart[]
   /** Why the model stopped (or the runtime truncated: max-iterations, doom-loop). */
-  finishReason?: string
+  readonly finishReason?: string
 }
 
 export interface ToolMessage extends BaseMessage {
