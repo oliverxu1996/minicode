@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { CODING_TOOLS } from "./tools"
-import { truncateOutput } from "./tools/truncate"
+import { CODING_TOOLS } from "../../src/tools"
+import { truncateOutput } from "../../src/tools/truncate"
 
 const ctx = (cwd: string) => ({ cwd })
 

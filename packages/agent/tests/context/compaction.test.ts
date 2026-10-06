@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { ModelError } from "@minicode/model"
-import { Compactor } from "./context/compaction"
-import { Session } from "./session/session"
-import { FakeModel, textResponse } from "./testing"
+import { Compactor } from "../../src/context/compaction"
+import { Session } from "../../src/session/session"
+import { FakeModel, textResponse } from "../support/testing"
 
 /** A session with a compactable region: an older turn large enough that the
  *  preserved tail stops before it, and a trailing assistant turn so the last

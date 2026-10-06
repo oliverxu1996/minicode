@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { loadSettings, projectSettingsPath, globalSettingsPath } from "./config/settings"
-import { formatProjectInstructions, loadProjectContext } from "./config/context"
-import { loadResources } from "./config/resources"
-import { isProjectTrusted, trustProject as trustProjectFn } from "./config/trust"
+import { loadSettings, projectSettingsPath, globalSettingsPath } from "../../src/config/settings"
+import { formatProjectInstructions, loadProjectContext } from "../../src/config/context"
+import { loadResources } from "../../src/config/resources"
+import { isProjectTrusted, trustProject as trustProjectFn } from "../../src/config/trust"
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "minicode-product-test-"))

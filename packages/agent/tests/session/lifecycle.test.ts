@@ -15,12 +15,12 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Compactor } from "./context/compaction"
-import { runTask } from "./loop/run"
-import { MiniCode } from "./minicode"
-import { Session } from "./session/session"
-import { FakeModel, textResponse, toolCallResponse } from "./testing"
-import type { Tool } from "./tools"
+import { Compactor } from "../../src/context/compaction"
+import { runTask } from "../../src/loop/run"
+import { MiniCode } from "../../src/minicode"
+import { Session } from "../../src/session/session"
+import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
+import type { Tool } from "../../src/tools"
 
 interface Fixture {
   readonly dir: string

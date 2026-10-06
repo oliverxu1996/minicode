@@ -8,16 +8,16 @@
  * the run-start recovery, which only a per-request boundary can catch.
  *
  * `needsRecovery()` stays advisory (see the D5 contract in
- * `session-boundary.test.ts`); the boundary, not the latch, guarantees
+ * `session/serialization.test.ts`); the boundary, not the latch, guarantees
  * reconciliation.
  */
 import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { MiniCode } from "./minicode"
-import { Session } from "./session/session"
-import { FakeModel, textResponse, toolCallResponse } from "./testing"
+import { MiniCode } from "../../src/minicode"
+import { Session } from "../../src/session/session"
+import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
 import type { ModelRequest } from "@minicode/model"
 
 function tempDir(): { dir: string; cleanup: () => void } {

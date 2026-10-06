@@ -9,11 +9,11 @@ import {
   startMockProvider,
   testConfig,
   withConfigDir,
-} from "../../model/src/test-support"
-import { AgentLoop } from "./loop/loop"
-import { Session } from "./session/session"
-import { CODING_TOOLS, toModelTools } from "./tools"
-import { FakeModel, textResponse, toolCallResponse } from "./testing"
+} from "../../../model/src/test-support"
+import { AgentLoop } from "../../src/loop/loop"
+import { Session } from "../../src/session/session"
+import { CODING_TOOLS, toModelTools } from "../../src/tools"
+import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
 
 /** A marker no other part of the prompt could plausibly contain, injected
  *  through `projectInstructions` — the documented AGENTS.md channel. */

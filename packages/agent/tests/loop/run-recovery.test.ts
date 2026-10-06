@@ -13,12 +13,12 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ModelMessage } from "@minicode/model"
-import { Compactor } from "./context/compaction"
-import { MiniCode } from "./minicode"
-import { Session, UNKNOWN_OUTCOME_ERROR } from "./session/session"
-import type { ModelIdentity } from "./session/types"
-import { CODING_TOOLS } from "./tools"
-import { FakeModel, textResponse, toolCallResponse } from "./testing"
+import { Compactor } from "../../src/context/compaction"
+import { MiniCode } from "../../src/minicode"
+import { Session, UNKNOWN_OUTCOME_ERROR } from "../../src/session/session"
+import type { ModelIdentity } from "../../src/session/types"
+import { CODING_TOOLS } from "../../src/tools"
+import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
 
 const MODEL: ModelIdentity = {
   id: "test-model",

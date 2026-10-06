@@ -12,11 +12,11 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ModelAssistantPart, ModelToolResult } from "@minicode/model"
-import { executeTool } from "./loop/execute"
-import { isPrunedToolOutput } from "./context/projection"
-import { Session } from "./session/session"
-import { truncateOutput } from "./tools/truncate"
-import type { Tool, ToolResult } from "./tools/types"
+import { executeTool } from "../../src/loop/execute"
+import { isPrunedToolOutput } from "../../src/context/projection"
+import { Session } from "../../src/session/session"
+import { truncateOutput } from "../../src/tools/truncate"
+import type { Tool, ToolResult } from "../../src/tools/types"
 
 const THRESHOLD = 2048 // the canonical cap; this work deliberately does not change it.
 

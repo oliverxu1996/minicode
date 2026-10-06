@@ -1,16 +1,27 @@
+/**
+ * The durable Session: its read-only history surface, its mutable history
+ * operations, its run lifecycle, and its crash/reload behaviour.
+ *
+ * The history-boundary test is type-level: its `@ts-expect-error` lines must
+ * FAIL to compile, which `bun run typecheck` enforces. The closure is never
+ * invoked.
+ *
+ * "Durable" is asserted the only way that can tell memory from disk: by
+ * discarding the in-memory object and reloading through a fresh runtime root.
+ */
 import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Model } from "@minicode/model"
-import type { ModelIdentity } from "./session/types"
-import { MiniCode } from "./minicode"
-import { Session, UNKNOWN_OUTCOME_ERROR } from "./session/session"
-import { SessionStore } from "./session/store"
-import { ToolLedger, toolDurationMs } from "./session/ledger"
-import { CODING_TOOLS } from "./tools"
-import { executeTool } from "./loop/execute"
-import { FakeModel, textResponse } from "./testing"
+import { executeTool } from "../../src/loop/execute"
+import { MiniCode } from "../../src/minicode"
+import { toolDurationMs } from "../../src/session/ledger"
+import { Session, UNKNOWN_OUTCOME_ERROR } from "../../src/session/session"
+import { SessionStore } from "../../src/session/store"
+import type { ModelIdentity } from "../../src/session/types"
+import { CODING_TOOLS } from "../../src/tools"
+import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
 
 /** A model identity for runs a test starts directly (crash simulation). */
 const RUN_MODEL: ModelIdentity = {
@@ -28,12 +39,14 @@ function tempDir(): { dir: string; cleanup: () => void } {
 }
 
 interface Harness {
+  /** The temp workspace root; sessions live at `join(dir, "sessions")`. */
+  dir: string
   agent: MiniCode
   /** Simulates a crash-restart: persists the live session (the crash-time
    *  snapshot), then loads it through a fresh runtime root with an empty
    *  session cache. */
   reloadAsNewProcess(session: Session): Promise<Session>
-  cleanup: () => void
+  cleanup(): void
 }
 
 function harness(model?: Model): Harness {
@@ -41,6 +54,7 @@ function harness(model?: Model): Harness {
   const sessionsDir = join(dir, "sessions")
   const agent = new MiniCode({ sessionsDir, model })
   return {
+    dir,
     agent,
     reloadAsNewProcess: async (session: Session) => {
       await session.checkpoint()
@@ -51,35 +65,92 @@ function harness(model?: Model): Harness {
   }
 }
 
-describe("ToolLedger (AC7)", () => {
-  test("transitions pending → running → succeeded", () => {
-    const ledger = new ToolLedger()
-    ledger.pending({ toolCallId: "c1", name: "bash", input: { command: "x" } })
-    expect(ledger.get("c1")?.status).toBe("pending")
-    ledger.running("c1")
-    expect(ledger.get("c1")?.status).toBe("running")
-    ledger.finished("c1", "succeeded")
-    expect(ledger.get("c1")?.status).toBe("succeeded")
+/** Never invoked: its body exists only so `tsc` checks the read-only boundary. */
+function typeOnly(fn: () => void): void {
+  void fn
+}
+
+function sess(): Session {
+  const session = Session.create({ cwd: "/tmp/minicode-boundary-test" })
+  session.onCheckpoint(async () => {})
+  return session
+}
+
+describe("F2 — Session history external read boundary", () => {
+  test("the collection and its message fields are read-only through the public API", () => {
+    const session = sess()
+    session.pushUser("hi")
+
+    typeOnly(() => {
+      // @ts-expect-error the collection is a read-only view
+      session.messages.push(session.messages[0])
+      // @ts-expect-error length is read-only
+      session.messages.length = 0
+      // @ts-expect-error indexes are read-only
+      session.messages[0] = session.messages[0]
+      // @ts-expect-error messages is a getter-only view
+      session.messages = []
+      // @ts-expect-error message status is read-only
+      session.messages[0].status = "complete"
+      // @ts-expect-error message timestamp is read-only
+      session.messages[0].timestamp = 0
+    })
+
+    expect(session.messages).toHaveLength(1)
+    expect(session.messages[0].content).toBe("hi")
   })
 
-  test("illegal transitions throw", () => {
-    const ledger = new ToolLedger()
-    ledger.pending({ toolCallId: "c1", name: "bash", input: {} })
-    // Finalizing from `pending` is legal (gate outcomes)…
-    ledger.finished("c1", "succeeded")
-    // …but a terminal state is immutable.
-    expect(() => ledger.running("c1")).toThrow()
-    expect(() => ledger.finished("c1", "failed")).toThrow()
-    expect(() => ledger.reissue("c1")).toThrow()
+  test("legitimate Session history operations still work", async () => {
+    const session = sess()
+    const user = session.pushUser("hi")
+    expect(user.role).toBe("user")
+
+    const assistant = session.appendAssistant([{ type: "text", text: "hello" }], { finishReason: "stop" })
+    expect(assistant.role).toBe("assistant")
+
+    const toolMsg = session.toolResultMessageFor(assistant)
+    session.appendToolResult(toolMsg, {
+      toolCallId: "c1",
+      toolName: "bash",
+      output: { type: "text", text: "ok" },
+    })
+    session.markFailureEvidence(toolMsg)
+    session.markAffordances(toolMsg, "c1", { externalizedAt: "/tmp/out", resumeOffset: 10 })
+
+    expect(session.messages.map(m => m.role)).toEqual(["user", "assistant", "tool"])
+    const tool = session.messages[2]
+    if (tool.role !== "tool") throw new Error("expected a tool message")
+    expect(tool.content[0].output).toEqual({ type: "text", text: "ok" })
+    expect(tool.failureEvidence).toBe(true)
+    expect(tool.affordances).toEqual({ c1: { externalizedAt: "/tmp/out", resumeOffset: 10 } })
+    expect(session.findToolResult("c1")?.toolName).toBe("bash")
+    expect(session.lastAssistant()?.role).toBe("assistant")
   })
 
-  test("duplicate terminal ids error; duplicate pending ids are reissue no-ops", () => {
-    const ledger = new ToolLedger()
-    ledger.pending({ toolCallId: "c1", name: "bash", input: {} })
-    ledger.pending({ toolCallId: "c1", name: "bash", input: {} }) // reissue no-op
-    expect(ledger.get("c1")?.status).toBe("pending")
-    ledger.finished("c1", "failed")
-    expect(() => ledger.pending({ toolCallId: "c1", name: "edit", input: {} })).toThrow()
+  test("replaceMessages still replaces history and persists", async () => {
+    const session = sess()
+    let checkpoints = 0
+    session.onCheckpoint(async () => {
+      checkpoints += 1
+    })
+    await session.replaceMessages([
+      { role: "user", content: "task" },
+      { role: "assistant", content: [{ type: "text", text: "done" }] },
+    ])
+    expect(session.messages.map(m => m.role)).toEqual(["user", "assistant"])
+    expect(checkpoints).toBe(1)
+  })
+})
+
+describe("durable snapshot storage", () => {
+  test("the atomic store round-trips snapshots", async () => {
+    const { dir, cleanup } = tempDir()
+    const store = new SessionStore(join(dir, "store"))
+    await store.saveJSON("s1", JSON.stringify({ id: "s1" }))
+    const parsed = await store.read("s1") as { id: string }
+    expect(parsed.id).toBe("s1")
+    expect(await store.list()).toEqual(["s1"])
+    cleanup()
   })
 })
 
@@ -207,14 +278,31 @@ describe("Crash recovery (V2, AC6/AC7)", () => {
     expect(persisted.takeRecoveryNote()).toBeNull()
     cleanup()
   })
+})
 
-  test("the atomic store round-trips snapshots", async () => {
-    const { dir, cleanup } = tempDir()
-    const store = new SessionStore(join(dir, "store"))
-    await store.saveJSON("s1", JSON.stringify({ id: "s1" }))
-    const parsed = await store.read("s1") as { id: string }
-    expect(parsed.id).toBe("s1")
-    expect(await store.list()).toEqual(["s1"])
+describe("tool duration across a restart", () => {
+  test("an unknown outcome across a restart manufactures no duration", async () => {
+    const { agent, reloadAsNewProcess, cleanup } = harness()
+    const session = agent.createSession(join(tempDir().dir, "ws"))
+    await session.checkpoint()
+    const assistant = session.appendAssistant(
+      [{ type: "tool_call", toolCallId: "call_1", toolName: "edit", input: { filePath: "x.ts" } }],
+      { finishReason: "tool_call" },
+    )
+    session.toolResultMessageFor(assistant)
+    session.ledger.pending({ toolCallId: "call_1", name: "edit", input: { filePath: "x.ts" } })
+    session.ledger.running("call_1", { startedAt: 1_000 })
+
+    await session.beginRun(RUN_MODEL) // crash mid-run, after the tool started
+    const persisted = await reloadAsNewProcess(session)
+    await persisted.recover({ tools: CODING_TOOLS })
+
+    const entry = persisted.ledger.get("call_1")!
+    // Existing outcome semantics are untouched…
+    expect(entry.status).toBe("failed")
+    expect(entry.note).toBe(UNKNOWN_OUTCOME_ERROR)
+    // …and the invocation that never finished has no interval to report.
+    expect(toolDurationMs(entry)).toBeUndefined()
     cleanup()
   })
 })
@@ -258,196 +346,6 @@ describe("Usage detail persistence (O1)", () => {
     const persisted = await reloadAsNewProcess(session)
     expect(persisted.runs[0]?.usage).toEqual(providerUsage)
     cleanup()
-  })
-})
-
-describe("session summaries use the validating parser", () => {
-  function summaryHarness() {
-    const { dir, cleanup } = tempDir()
-    const sessionsDir = join(dir, "sessions")
-    return {
-      sessionsDir,
-      agent: new MiniCode({ sessionsDir }),
-      fresh: () => new MiniCode({ sessionsDir }),
-      cleanup,
-    }
-  }
-
-  test("a valid session summary agrees with loading that session", async () => {
-    const h = summaryHarness()
-    const session = h.agent.createSession("/tmp/summary-ws")
-    session.pushUser("hello there")
-    session.appendAssistant([{ type: "text", text: "hi" }], {})
-    session.title = "my session"
-    await session.checkpoint()
-
-    const [summary] = await h.fresh().sessionSummaries()
-    expect(summary).toBeDefined()
-    expect(summary!.id).toBe(session.id)
-    expect(summary!.title).toBe("my session")
-    expect(summary!.firstUser).toBe("hello there")
-    // The picker and the loaded session cannot disagree about size.
-    const loaded = await h.fresh().loadSession(session.id)
-    expect(summary!.messageCount).toBe(loaded.messages.length)
-    h.cleanup()
-  })
-
-  // The old summary path cast `json.messages` unchecked and took `.length`. On
-  // a corrupt snapshot that is not merely lenient, it is nonsense — a string
-  // field yields its character count. The validating parser is what loading
-  // already used, so the picker now reports what a load would produce.
-  test("a corrupted messages field is validated, not counted raw", async () => {
-    const h = summaryHarness()
-    const session = h.agent.createSession("/tmp/summary-ws")
-    session.pushUser("real message")
-    await session.checkpoint()
-
-    const file = join(h.sessionsDir, `${session.id}.json`)
-    const json = JSON.parse(readFileSync(file, "utf-8"))
-    json.messages = "not-an-array"
-    writeFileSync(file, JSON.stringify(json))
-
-    const [summary] = await h.fresh().sessionSummaries()
-    expect(summary).toBeDefined()
-    expect(summary!.messageCount).toBe(0)
-    h.cleanup()
-  })
-
-  test("invalid entries are dropped rather than counted", async () => {
-    const h = summaryHarness()
-    const session = h.agent.createSession("/tmp/summary-ws")
-    session.pushUser("real message")
-    await session.checkpoint()
-
-    const file = join(h.sessionsDir, `${session.id}.json`)
-    const json = JSON.parse(readFileSync(file, "utf-8"))
-    json.messages = [
-      { role: "user", content: "kept", timestamp: 1 },
-      { role: "bogus", content: "dropped" },
-      "garbage",
-    ]
-    writeFileSync(file, JSON.stringify(json))
-
-    const [summary] = await h.fresh().sessionSummaries()
-    expect(summary!.messageCount).toBe(1)
-    expect(summary!.firstUser).toBe("kept")
-    h.cleanup()
-  })
-
-  test("normal session loading is unaffected", async () => {
-    const h = summaryHarness()
-    const session = h.agent.createSession("/tmp/summary-ws")
-    session.pushUser("round trip")
-    await session.checkpoint()
-
-    const loaded = await h.fresh().loadSession(session.id)
-    expect(loaded.messages).toHaveLength(1)
-    expect((loaded.messages[0] as { content: string }).content).toBe("round trip")
-    h.cleanup()
-  })
-})
-
-describe("Tool duration (O3)", () => {
-  // Derived from the ledger's own timestamps, which stay the durable source.
-  // A duration the runtime has no evidence for must stay unknown — never 0.
-
-  test("a completed invocation reports the interval it actually spanned", () => {
-    const ledger = new ToolLedger()
-    ledger.pending({ toolCallId: "c1", name: "bash", input: {} })
-    ledger.running("c1", { startedAt: 1_000 })
-    ledger.finished("c1", "succeeded", { finishedAt: 1_450 })
-
-    expect(toolDurationMs(ledger.get("c1")!)).toBe(450)
-  })
-
-  test("an invocation that never started reports no duration", () => {
-    const ledger = new ToolLedger()
-    ledger.pending({ toolCallId: "c1", name: "bash", input: {} })
-    ledger.finished("c1", "failed", { finishedAt: 1_450 })
-
-    expect(ledger.get("c1")!.startedAt).toBeUndefined()
-    expect(toolDurationMs(ledger.get("c1")!)).toBeUndefined()
-  })
-
-  test("an invocation that never finished reports no duration", () => {
-    const ledger = new ToolLedger()
-    ledger.pending({ toolCallId: "c1", name: "bash", input: {} })
-    ledger.running("c1", { startedAt: 1_000 })
-
-    expect(toolDurationMs(ledger.get("c1")!)).toBeUndefined()
-  })
-
-  test("a reissued invocation is not measured across the gap", () => {
-    const ledger = new ToolLedger()
-    ledger.pending({ toolCallId: "c1", name: "read", input: {} })
-    ledger.running("c1", { startedAt: 1_000 })
-    ledger.reissue("c1", "previous outcome unknown; idempotent tool reissued after restart")
-
-    // Reissue erases the interval: nothing pairs the stale start with a later
-    // end, so the gap is not reported as execution time.
-    expect(toolDurationMs(ledger.get("c1")!)).toBeUndefined()
-
-    // The re-execution reports its own interval, not the one spanning the gap.
-    ledger.running("c1", { startedAt: 5_000 })
-    ledger.finished("c1", "succeeded", { finishedAt: 5_450 })
-    expect(toolDurationMs(ledger.get("c1")!)).toBe(450)
-  })
-
-  test("an unknown outcome across a restart manufactures no duration", async () => {
-    const { agent, reloadAsNewProcess, cleanup } = harness()
-    const session = agent.createSession(join(tempDir().dir, "ws"))
-    await session.checkpoint()
-    const assistant = session.appendAssistant(
-      [{ type: "tool_call", toolCallId: "call_1", toolName: "edit", input: { filePath: "x.ts" } }],
-      { finishReason: "tool_call" },
-    )
-    session.toolResultMessageFor(assistant)
-    session.ledger.pending({ toolCallId: "call_1", name: "edit", input: { filePath: "x.ts" } })
-    session.ledger.running("call_1", { startedAt: 1_000 })
-
-    await session.beginRun(RUN_MODEL) // crash mid-run, after the tool started
-    const persisted = await reloadAsNewProcess(session)
-    await persisted.recover({ tools: CODING_TOOLS })
-
-    const entry = persisted.ledger.get("call_1")!
-    // Existing outcome semantics are untouched…
-    expect(entry.status).toBe("failed")
-    expect(entry.note).toBe(UNKNOWN_OUTCOME_ERROR)
-    // …and the invocation that never finished has no interval to report.
-    expect(toolDurationMs(entry)).toBeUndefined()
-    cleanup()
-  })
-})
-
-describe("Run record migration (O2)", () => {
-  test("a snapshot written before run records existed still loads", () => {
-    // Sessions persisted by an earlier version have no `runs` key at all; one
-    // must load as a session with no recorded runs, not fail.
-    const session = Session.fromJSON({
-      version: 1,
-      id: "s1",
-      cwd: "/tmp",
-      status: "idle",
-      messages: [],
-    })
-    expect(session.runs).toEqual([])
-  })
-
-  test("a malformed run record is skipped rather than failing the load", () => {
-    const session = Session.fromJSON({
-      version: 1,
-      id: "s1",
-      cwd: "/tmp",
-      status: "idle",
-      messages: [],
-      runs: [
-        { id: "run-1", startedAt: 1, model: { id: "m" } },
-        { startedAt: 2, model: { id: "m" } }, // no id
-        "not a record",
-      ],
-    })
-    expect(session.runs).toHaveLength(1)
-    expect(session.runs[0]!.id).toBe("run-1")
   })
 })
 
@@ -619,19 +517,22 @@ describe("Run lifecycle ownership", () => {
   })
 })
 
-describe("Model resolution (V2)", () => {
-  test("MiniCode without a configured model reports the missing dependency", async () => {
-    const { dir, cleanup } = tempDir()
-    const previousConfigDir = process.env.XDG_CONFIG_HOME
-    process.env.XDG_CONFIG_HOME = join(dir, "config")
-    try {
-      const agent = new MiniCode()
-      const session = agent.createSession(join(dir, "ws"))
-      await expect(agent.run(session, "no model")).rejects.toThrow(/No active model/)
-    } finally {
-      if (previousConfigDir === undefined) delete process.env.XDG_CONFIG_HOME
-      else process.env.XDG_CONFIG_HOME = previousConfigDir
-    }
+describe("Session durability (V2, AC6)", () => {
+  test("checkpointed sessions survive reload through the store", async () => {
+    const { agent, dir, cleanup } = harness(new FakeModel([
+      toolCallResponse([{ toolCallId: "call_1", toolName: "write", input: { filePath: "a.txt", content: "hi" } }]),
+      textResponse("wrote it"),
+    ]))
+    const workspace = join(dir, "ws")
+    mkdirSync(workspace, { recursive: true })
+    const session = agent.createSession(workspace)
+    await agent.run(session, "write a file")
+
+    const reloaded = await agent.loadSession(session.id)
+    expect(reloaded.messages.map(m => m.role)).toEqual(["user", "assistant", "tool", "assistant"])
+    expect(reloaded.ledger.get("call_1")?.status).toBe("succeeded")
+    expect(readFileSync(join(workspace, "a.txt"), "utf-8")).toBe("hi")
     cleanup()
   })
 })
+
