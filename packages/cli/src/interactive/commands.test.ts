@@ -35,3 +35,18 @@ describe("/compact busy handling", () => {
     expect(notices).toEqual(["a task is running — wait for it to finish before compacting"])
   })
 })
+
+describe("/quit lifecycle", () => {
+  test("uses the UI shutdown hook instead of exiting the process directly", async () => {
+    // The fullscreen renderer must be stopped through the UI lifecycle so the
+    // alternate screen and mouse state are restored before the process exits.
+    let quitCalls = 0
+    const ctx = {
+      quit: () => {
+        quitCalls += 1
+      },
+    } as unknown as CommandContext
+    await findCommand("quit")!.execute(ctx, "")
+    expect(quitCalls).toBe(1)
+  })
+})

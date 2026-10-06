@@ -38,6 +38,12 @@ export interface CommandContext {
    * stay as they were when the app started.
    */
   reloadResources(): void
+  /**
+   * Shuts the UI down through its own lifecycle (leaving the fullscreen screen
+   * and restoring the terminal) before exiting. Commands must use this rather
+   * than calling `process.exit` directly.
+   */
+  quit(): void
 }
 
 export interface Command {
@@ -394,8 +400,8 @@ export const COMMANDS: Command[] = [
   {
     name: "quit",
     description: "Exit MiniCode",
-    execute() {
-      process.exit(0)
+    execute(ctx) {
+      ctx.quit()
     },
   },
 ]

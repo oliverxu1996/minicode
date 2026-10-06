@@ -4,10 +4,11 @@ import {
 	Loader,
 	Markdown,
 	Text,
-	TuiMainScreen,
+	TuiAltScreen,
 	ProcessTerminal,
 	matchesKey,
 	type Component,
+	type OverlayHandle,
 } from "@minicode/tui"
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
@@ -24,9 +25,11 @@ import {
 	type RunDisplay,
 } from "../projection"
 import { FooterLineView } from "./view/footer"
+import { buildTuiLayout } from "./view/layout"
 import { runCompaction } from "./compaction"
 import { Selector, type SelectorItem } from "./view/selector"
 import { MiniCodeAutocomplete } from "./input/autocomplete"
+import { altEnterAsNewline } from "./input/alt-enter"
 import { expandFileReferences } from "./input/expand"
 import { COMMANDS, findCommand, type CommandContext, type CompactResult } from "./commands"
 import {
@@ -53,17 +56,21 @@ interface AskState {
 }
 
 /**
- * The MiniCode main-screen TUI.
+ * The MiniCode fullscreen TUI.
  * The runtime is the source of truth: `RunEvent`s map 1:1 onto component
  * updates and the editor submits through the existing `MiniCode.run()`.
  *
- * Keys: Enter submits — and steers while a task runs;
- * Alt+Enter queues a follow-up; Shift+Enter/Ctrl+J newline; Esc interrupts;
- * Ctrl-C clears (twice exits); Ctrl-D exits empty; Ctrl-O toggles tool
- * output; Ctrl-P cycles models.
+ * The conversation lives in an application-owned `ScrollView` (the only
+ * scrolling region); the status, composer, and two footer rows are fixed to the
+ * bottom. The header is the first item of the scroll content, so it scrolls away.
+ *
+ * Keys: Enter submits — and steers while a task runs; Alt+Enter inserts a
+ * newline; Esc interrupts; Ctrl-C clears (twice exits); Ctrl-D exits empty;
+ * Ctrl-O toggles tool output; Ctrl-P cycles models; PageUp/PageDown/Home/End and
+ * the mouse wheel scroll the conversation.
  */
 export class MiniCodeTui {
-	private readonly tui: TuiMainScreen
+	private readonly tui: TuiAltScreen
 	private readonly chat = new Container()
 	private readonly status = new Container()
 	private readonly editor: Editor
@@ -88,34 +95,39 @@ export class MiniCodeTui {
 	private modelLimits: ModelLimits | undefined
 	private compactThresholdPct: number | undefined
 	private gitBranch: string | undefined
-	private readonly followUps: string[] = []
 	private readonly pendingTools = new Map<string, ToolExecutionComponent>()
 	private streaming: Container | null = null
 	private streamingText = ""
 	private selector: Selector | null = null
+	private selectorOverlay: OverlayHandle | null = null
 	private askState: AskState | null = null
 	private promptTemplates: Array<{ name: string; description: string }> = []
 	private reasoning: Container | null = null
 	private readonly commandContext: CommandContext
 
 	constructor(private readonly options: MiniCodeTuiOptions) {
-		this.tui = new TuiMainScreen(new ProcessTerminal())
+		// A fullscreen viewport owns the screen: the conversation scrolls in-app
+		// while the composer/status/footer stay pinned to the bottom.
+		this.tui = new TuiAltScreen(new ProcessTerminal(), false, undefined, { mouse: true })
 		this.session = options.session
 
 		const hints = ansi.gray(
-			"enter submit · esc interrupt · ctrl+c clear (twice exits) · ctrl+d exit · ctrl+o tools · ctrl+p model · /help commands",
+			"enter submit · alt+enter newline · esc interrupt · ctrl+c clear (twice exits) · ctrl+d exit · ctrl+o tools · ctrl+p model · pageup/pagedown scroll · /help commands",
 		)
 		const header = new Container()
 		header.addChild(new Text(`${ansi.bold(ansi.cyan("MiniCode"))} ${ansi.gray(options.label ?? this.session.cwd)}`, 1, 0))
 		header.addChild(new Text(`  ${hints}`, 0, 0))
 
-		this.tui.addChild(header)
-		this.tui.addChild(this.chat)
-		this.tui.addChild(this.status)
 		this.editor = this.createEditor()
-		this.tui.addChild(this.editor)
-		this.tui.addChild(this.footerRow1)
-		this.tui.addChild(this.footerRow2)
+		const layout = buildTuiLayout({
+			header,
+			chat: this.chat,
+			status: this.status,
+			editor: this.editor,
+			footerRow1: this.footerRow1,
+			footerRow2: this.footerRow2,
+		})
+		this.tui.setLayoutRoot(layout.root)
 
 		this.loader = new Loader(this.tui, ansi.cyan, (text) => ansi.bold(text), "working… (esc to interrupt)")
 		this.tui.addInputListener(data => this.handleGlobalInput(data))
@@ -152,25 +164,31 @@ export class MiniCodeTui {
 					items as SelectorItem[],
 				)
 				return new Promise<string | null>(resolve => {
-					selector.onSelect = value => {
-						if (this.selector === selector) {
-							this.chat.removeChild(selector)
-							this.selector = null
-						}
+					// The selector is shown as a modal overlay so it owns input while
+					// open: viewport keys are deferred to it and the conversation does
+					// not scroll underneath the picker.
+					const close = (): void => {
+						if (this.selector !== selector) return
+						this.selector = null
+						this.selectorOverlay?.hide()
+						this.selectorOverlay = null
 						this.tui.setFocus(this.editor)
+					}
+					selector.onSelect = value => {
+						close()
 						resolve(value)
 					}
 					selector.onCancel = () => {
-						if (this.selector === selector) {
-							this.chat.removeChild(selector)
-							this.selector = null
-						}
-						this.tui.setFocus(this.editor)
+						close()
 						resolve(null)
 					}
 					this.selector = selector
-					this.chat.addChild(selector)
-					this.tui.setFocus(selector)
+					this.selectorOverlay = this.tui.showOverlay(selector, {
+						anchor: "center",
+						width: "80%",
+						minWidth: 40,
+						margin: 1,
+					})
 					this.tui.requestRender()
 				})
 			},
@@ -230,6 +248,7 @@ export class MiniCodeTui {
 			},
 			skills: (): Skill[] => this.currentSkills,
 			reloadResources: (): void => this.refreshTemplates(),
+			quit: (): void => this.shutdown(),
 		}
 	}
 
@@ -273,9 +292,15 @@ export class MiniCodeTui {
 
 	// ── global keys ───────────────────────────────────
 
-	private handleGlobalInput(data: string): { consume?: boolean } | undefined {
+	private handleGlobalInput(data: string): { consume?: boolean; data?: string } | undefined {
 		// An open selector owns the keyboard.
 		if (this.selector !== null) return undefined
+
+		// Alt+Enter inserts a newline in the composer. The application used to
+		// submit/queue here; it now rewrites the event so the editor's existing
+		// newline path handles it uniformly across terminal encodings.
+		const newline = altEnterAsNewline(data)
+		if (newline !== undefined) return newline
 
 		if (matchesKey(data, "escape")) {
 			if (this.askState !== null) {
@@ -325,19 +350,6 @@ export class MiniCodeTui {
 		}
 		if (matchesKey(data, "ctrl+p")) {
 			void this.cycleModel()
-			return { consume: true }
-		}
-		if (matchesKey(data, "alt+enter")) {
-			const text = this.editor.getText().trim()
-			if (text.length === 0) return { consume: true }
-			this.editor.setText("")
-			if (this.running) {
-				this.followUps.push(text)
-				this.chat.addChild(notice(`queued (${this.followUps.length}) — runs after the current task`))
-			} else {
-				void this.submit(text)
-			}
-			this.tui.requestRender()
 			return { consume: true }
 		}
 		return undefined
@@ -467,18 +479,6 @@ export class MiniCodeTui {
 			this.updateFooter()
 			this.tui.setFocus(this.editor)
 			this.tui.requestRender()
-		}
-
-		if (aborted && this.followUps.length > 0) {
-			const restored = this.followUps.splice(0)
-			this.editor.setText(restored.join("\n\n"))
-			this.chat.addChild(notice("queued messages restored to the editor"))
-			this.tui.requestRender()
-			return
-		}
-		if (this.followUps.length > 0 && !aborted) {
-			const next = this.followUps.shift()!
-			await this.startRun(next)
 		}
 	}
 
