@@ -135,6 +135,14 @@ export class AgentLoop {
 
     const budget = contextBudget(this.model.limits)
     const compactor = new Compactor(this.model, this.model.limits.contextWindow)
+    // Compaction rewrites durable history, so it is always persisted as one
+    // step: every trigger below compacts and checkpoints together, never one
+    // without the other.
+    const compactNow = async () => {
+      const outcome = await compactor.compact(this.session)
+      await this.session.checkpoint()
+      return outcome
+    }
     // Built on first use rather than eagerly: constructing the prompt consumes
     // the session's pending recovery note, so it must happen only once a model
     // request is actually about to be sent — the run can still abort first.
@@ -167,8 +175,7 @@ export class AgentLoop {
       if (autoCompact.enabled) {
         const threshold = Math.floor(budget.inputBudget * (autoCompact.thresholdPct / 100))
         if (lastInputTokens >= threshold && lastInputTokens > 0) {
-          const outcome = await compactor.compact(this.session)
-          await this.session.checkpoint()
+          const outcome = await compactNow()
           // Proactive compaction is best-effort: a failure here is not fatal,
           // because the reactive and provider paths still guard the request.
           if (outcome.status === "compacted") {
@@ -265,8 +272,7 @@ export class AgentLoop {
               return { aborted: false, finishReason: "error", iterations, error: err.message }
             }
             compactionRetries += 1
-            const outcome = await compactor.compact(this.session)
-            await this.session.checkpoint()
+            const outcome = await compactNow()
             if (outcome.status === "compacted") {
               // The rejected request is not a model call and its usage was
               // never reported; only the compaction that followed is recorded.
@@ -380,8 +386,7 @@ export class AgentLoop {
       // Reactive overflow: the input budget is spent — compact before the
       // next request. If compaction is impossible, stop deterministically.
       if (compactor.isOverflow(response.usage)) {
-        const outcome = await compactor.compact(this.session)
-        await this.session.checkpoint()
+        const outcome = await compactNow()
         if (outcome.status === "compacted") {
           emit(compactionEvent(outcome))
         } else {

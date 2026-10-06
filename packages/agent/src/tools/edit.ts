@@ -2,6 +2,7 @@ import * as path from "node:path"
 import { createTwoFilesPatch } from "diff"
 import type { Tool, ToolExecutionContext, ToolResult } from "./types"
 import { resolveToolPath } from "./types"
+import { levenshtein } from "./levenshtein"
 
 export const editTool: Tool = {
   description:
@@ -121,24 +122,6 @@ interface ReplacerMatch {
 }
 
 type Replacer = (content: string, oldStr: string, newStr: string) => ReplacerMatch | null
-
-function levenshtein(a: string, b: string): number {
-  if (a.length === 0) return b.length
-  if (b.length === 0) return a.length
-  const prev = new Uint32Array(b.length + 1)
-  const curr = new Uint32Array(b.length + 1)
-  for (let j = 0; j <= b.length; j++) prev[j] = j
-  for (let i = 0; i < a.length; i++) {
-    curr[0] = i + 1
-    for (let j = 0; j < b.length; j++) {
-      curr[j + 1] = a[i] === b[j] ? prev[j] : 1 + Math.min(prev[j], curr[j], prev[j + 1])
-    }
-    const tmp = prev
-    prev.set(curr)
-    curr.set(tmp)
-  }
-  return prev[b.length]
-}
 
 function simpleReplacer(content: string, oldStr: string, newStr: string): ReplacerMatch | null {
   let count = 0

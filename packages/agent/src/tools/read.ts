@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises"
 import * as path from "node:path"
 import type { Tool, ToolExecutionContext, ToolResult } from "./types"
 import { resolveToolPath } from "./types"
+import { levenshtein } from "./levenshtein"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -91,7 +92,7 @@ async function miss(filepath: string): Promise<ToolResult> {
     const scored = entries
       .map(item => {
         const itemLower = item.toLowerCase()
-        const dist = levenshteinDistance(base, itemLower)
+        const dist = levenshtein(base, itemLower)
         const isSubstring = itemLower.includes(base) || base.includes(itemLower)
         return { item, dist, isSubstring }
       })
@@ -261,20 +262,4 @@ function formatFileOutput(
   return result.cut || result.more
     ? { ok: true, data: output, affordances: { resumeOffset: next } }
     : { ok: true, data: output }
-}
-
-function levenshteinDistance(a: string, b: string): number {
-  const m = a.length
-  const n = b.length
-  let prev = Array.from({ length: n + 1 }, (_, j) => j)
-  let curr = new Array<number>(n + 1)
-  for (let i = 1; i <= m; i++) {
-    curr[0] = i
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost)
-    }
-    ;[prev, curr] = [curr, prev]
-  }
-  return prev[n]
 }
