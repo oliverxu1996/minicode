@@ -388,11 +388,11 @@ export const COMMANDS: Command[] = [
     execute(ctx) {
       ctx.notify(
         [
-          "enter — submit · shift+enter / ctrl+j — newline",
+          "enter — submit · alt+enter / shift+enter / ctrl+j — newline",
           "esc — interrupt the running task",
           "ctrl+c — clear input; twice within 500ms exits",
           "ctrl+d — exit (empty editor) · ctrl+o — expand tool output",
-          "ctrl+p — cycle model · alt+enter — queue follow-up while running",
+          "ctrl+p — cycle model",
         ].join("\n"),
       )
     },

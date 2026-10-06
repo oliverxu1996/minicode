@@ -50,3 +50,27 @@ describe("/quit lifecycle", () => {
     expect(quitCalls).toBe(1)
   })
 })
+
+describe("/hotkeys documentation", () => {
+  test("advertises the current submit/newline keys and no follow-up queue", async () => {
+    const notices: string[] = []
+    const ctx = { notify: (text: string) => { notices.push(text) } } as unknown as CommandContext
+
+    await findCommand("hotkeys")!.execute(ctx, "")
+
+    expect(notices).toHaveLength(1)
+    const text = notices[0]!
+
+    // The retired Alt+Enter follow-up queue must not be advertised anymore.
+    expect(text).not.toMatch(/queue/i)
+    expect(text).not.toMatch(/follow[\s-]?up/i)
+
+    // Enter submits; Alt+Enter / Shift+Enter / Ctrl+J insert a newline.
+    const submitLine = text.split("\n")[0]!
+    expect(submitLine).toContain("enter — submit")
+    expect(submitLine).toContain("alt+enter")
+    expect(submitLine).toContain("shift+enter")
+    expect(submitLine).toContain("ctrl+j")
+    expect(submitLine).toContain("newline")
+  })
+})
