@@ -59,13 +59,22 @@ export interface ToolMessage extends BaseMessage {
    */
   readonly failureEvidence?: boolean
   /**
-   * How to recover output this turn no longer carries in full — declared by
+   * How to recover output a result no longer carries in full — declared by
    * whichever layer capped it (a tool's own limit, or `truncateOutput`'s
-   * spill). Agent-local and durable, exactly like {@link failureEvidence}:
+   * spill), keyed by the `toolCallId` of the result it describes.
+   *
+   * Keyed because one turn holds one result per tool call, and the factual unit
+   * of a recovery affordance is one execution: a turn with two calls must not
+   * let either result's affordance describe the other. The key is the id that
+   * already correlates results to calls (`ModelToolResult.toolCallId`), so
+   * "this result has no affordance" is the absence of a key rather than a value
+   * a sibling could inherit.
+   *
+   * Agent-local and durable, exactly like {@link failureEvidence}:
    * request-time pruning reads it instead of parsing the result's prose, and
    * it is stripped before the provider sees anything.
    */
-  readonly affordances?: ToolAffordances
+  readonly affordances?: Readonly<Record<string, ToolAffordances>>
 }
 
 export type SessionMessage = UserMessage | AssistantMessage | ToolMessage

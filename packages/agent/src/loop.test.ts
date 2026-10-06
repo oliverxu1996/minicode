@@ -35,7 +35,7 @@ describe("AgentLoop control flow (V2)", () => {
     // Large enough that the canonical cap externalized it…
     const toolMsg = session.messages[2]
     if (toolMsg.role !== "tool") throw new Error("expected tool message")
-    expect(toolMsg.affordances?.externalizedAt).toBeDefined()
+    expect(toolMsg.affordances?.call_1?.externalizedAt).toBeDefined()
 
     // …but recovery metadata is durable agent state, not model-facing content.
     for (const request of model.requests) {

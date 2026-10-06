@@ -330,14 +330,23 @@ export class Session {
   }
 
   /**
-   * Records how to recover output this turn no longer carries in full —
-   * declared by whichever layer capped it. Durable, and honored by
-   * request-time pruning; see `ToolMessage.affordances`. Merged rather than
-   * replaced, so a tool's own offset survives the canonical spill.
+   * Records how to recover output ONE tool result no longer carries in full —
+   * declared by whichever layer capped it. Keyed by `toolCallId`, so a turn
+   * carrying several results keeps each one's recovery separate. Durable, and
+   * honored by request-time pruning; see `ToolMessage.affordances`. Merged
+   * within a key rather than replaced, so a tool's own offset survives the
+   * canonical spill.
    */
-  markAffordances(toolMsg: SessionMessage & { role: "tool" }, affordances: ToolAffordances): void {
-    const target = toolMsg as { affordances?: ToolAffordances }
-    target.affordances = { ...target.affordances, ...affordances }
+  markAffordances(
+    toolMsg: SessionMessage & { role: "tool" },
+    toolCallId: string,
+    affordances: ToolAffordances,
+  ): void {
+    const target = toolMsg as { affordances?: Record<string, ToolAffordances> }
+    target.affordances = {
+      ...target.affordances,
+      [toolCallId]: { ...target.affordances?.[toolCallId], ...affordances },
+    }
   }
 
   /** Finds the tool result recorded for a toolCallId, if any. */

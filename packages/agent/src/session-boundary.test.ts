@@ -164,14 +164,14 @@ describe("F2 — Session history external read boundary", () => {
       output: { type: "text", text: "ok" },
     })
     session.markFailureEvidence(toolMsg)
-    session.markAffordances(toolMsg, { externalizedAt: "/tmp/out", resumeOffset: 10 })
+    session.markAffordances(toolMsg, "c1", { externalizedAt: "/tmp/out", resumeOffset: 10 })
 
     expect(session.messages.map(m => m.role)).toEqual(["user", "assistant", "tool"])
     const tool = session.messages[2]
     if (tool.role !== "tool") throw new Error("expected a tool message")
     expect(tool.content[0].output).toEqual({ type: "text", text: "ok" })
     expect(tool.failureEvidence).toBe(true)
-    expect(tool.affordances).toEqual({ externalizedAt: "/tmp/out", resumeOffset: 10 })
+    expect(tool.affordances).toEqual({ c1: { externalizedAt: "/tmp/out", resumeOffset: 10 } })
     expect(session.findToolResult("c1")?.toolName).toBe("bash")
     expect(session.lastAssistant()?.role).toBe("assistant")
   })

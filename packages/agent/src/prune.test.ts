@@ -27,7 +27,10 @@ const tool = (
 ): ProjectionMessage => ({
   role: "tool",
   content: [{ toolCallId, toolName: "bash", output: { type: "text", text } }],
-  ...(extra ?? {}),
+  ...(extra?.failureEvidence === true ? { failureEvidence: true } : {}),
+  // Affordances are keyed by the result they describe. This helper builds a
+  // one-result message, so the key is that result's id.
+  ...(extra?.affordances === undefined ? {} : { affordances: { [toolCallId]: extra.affordances } }),
 })
 
 const errorTool = (toolCallId: string, text: string): ProjectionMessage => ({

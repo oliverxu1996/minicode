@@ -103,9 +103,11 @@ export async function executeTool(
   }
   // How to get back to anything the cap withheld. Declared structurally by
   // whichever layer capped (the tool itself, or the spill above) so request-time
-  // pruning never has to recognise the wording of the message above.
+  // pruning never has to recognise the wording of the message above, and keyed
+  // by this call's id so a sibling result in the same turn cannot be handed
+  // this one's recovery.
   if (truncated.ok && truncated.affordances !== undefined) {
-    session.markAffordances(toolMsg, truncated.affordances)
+    session.markAffordances(toolMsg, toolCallId, truncated.affordances)
   }
   session.ledger.finished(toolCallId, truncated.ok ? "succeeded" : "failed")
   // Result + final ledger state land in ONE checkpoint: no crash window can

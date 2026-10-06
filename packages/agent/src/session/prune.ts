@@ -17,8 +17,13 @@ export type PruneReason = "request-over-budget"
 /** A `ToolMessage` plus Agent-local metadata that never reaches the provider. */
 export type ProjectionMessage = ModelMessage & {
   readonly failureEvidence?: boolean
-  /** Declared by whichever layer capped the result — see `ToolAffordances`. */
-  readonly affordances?: ToolAffordances
+  /**
+   * Declared by whichever layer capped a result — see `ToolAffordances`.
+   * Keyed by `toolCallId`, because the metadata describes one execution: a
+   * turn's results must each be reduced with their own recovery, never a
+   * sibling's.
+   */
+  readonly affordances?: Readonly<Record<string, ToolAffordances>>
 }
 
 /** What one pruning pass actually removed. */
@@ -219,7 +224,8 @@ export function pruneOldToolOutputs(
       if (!isReducible(projection[i], result)) continue
       const text = textOf(result)
       const bytes = Buffer.byteLength(text, "utf-8")
-      const affordances = projection[i].affordances
+      // This result's own recovery, not its siblings' — see `ToolMessage.affordances`.
+      const affordances = projection[i].affordances?.[result.toolCallId]
       projection[i] = {
         ...projection[i],
         content: current.map((candidate, ri) =>
@@ -254,7 +260,9 @@ export function pruneOldToolOutputs(
           projection[i] = {
             ...projection[i],
             content: content.map((candidate, ri) =>
-              ri === r ? markerFor(result, projection[i].affordances, excerpt, bytes) : candidate),
+              ri === r
+                ? markerFor(result, projection[i].affordances?.[result.toolCallId], excerpt, bytes)
+                : candidate),
           } as ProjectionMessage
           if (!recorded) {
             recorded = true
