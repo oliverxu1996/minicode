@@ -68,6 +68,14 @@ export class Compactor {
   /** Rewrites history around an LLM summary. Never throws — every failure is
    *  reported through {@link CompactionOutcome} instead of a bare `0`. */
   async compact(session: Session): Promise<CompactionOutcome> {
+    // The summarization call is a model request, so it passes the same
+    // boundary as every other request: reconcile interruptible execution
+    // state first, so the summary request never carries an unresolved tool
+    // call. `recover` is idempotent and a no-op when there is nothing to
+    // reconcile, so this is safe for in-loop compaction too (where the run
+    // already reconciled before its requests).
+    await session.recover()
+
     const messages = session.messages
     // The compactable region is everything UP TO AND INCLUDING the last
     // user message; the trailing in-progress turn (assistant/tool messages

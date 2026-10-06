@@ -101,11 +101,13 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
 
   // `beginRun` already persisted 'running' and the partial record BEFORE
   // execution, so a crash mid-run leaves 'running' on disk for recovery to
-  // reconcile.
-  emit({ type: "run_start", sessionId: session.id, runId, task, model: identity })
-
+  // reconcile. `run_start` is delivered INSIDE the protected region: a
+  // throwing event consumer must not escape before the run reaches its
+  // terminal transition, or the session would be stranded as active. The
+  // consumer's failure becomes the run's error outcome (never a success).
   let result: RunResult
   try {
+    emit({ type: "run_start", sessionId: session.id, runId, task, model: identity })
     // The skill tool appears only when skills are available.
     const tools = new Map(deps.tools ?? CODING_TOOLS)
     if (deps.skills !== undefined && deps.skills.length > 0) {
@@ -114,8 +116,8 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
     const loop = new AgentLoop(session, model, tools)
     result = await loop.run(task, { ...deps, onEvent: emit, onPrune: recordPrune })
   } catch (err) {
-    // The loop is contractually non-throwing; this guards runtime bugs so a
-    // session never stays stuck in 'running'.
+    // The loop is contractually non-throwing; this guards runtime bugs and a
+    // throwing event consumer so a session never stays stuck in 'running'.
     result = {
       aborted: false,
       finishReason: "error",

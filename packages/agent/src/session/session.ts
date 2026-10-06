@@ -217,10 +217,25 @@ export class Session {
     }
     const runId = crypto.randomUUID()
     const started: RunSummary = { id: runId, startedAt: Date.now(), model }
+    // Snapshot everything this call will mutate, so a failed initial
+    // checkpoint cannot leave the session holding a run it never durably
+    // established.
+    const prevStatus = this._status
+    const prevUpdatedAt = this.updatedAt
     this._runs.push(started)
     this.activeRunId = runId
     this._status = "running"
-    await this.checkpoint()
+    try {
+      await this.checkpoint()
+    } catch (err) {
+      // Roll back every mutation made above: a start that could not be made
+      // durable must not strand the session in an active run.
+      this._runs.pop()
+      this.activeRunId = null
+      this._status = prevStatus
+      this.updatedAt = prevUpdatedAt
+      throw err
+    }
     return started
   }
 
@@ -464,9 +479,12 @@ export class Session {
    * Never fabricates success: unknown outcomes stay unknown.
    */
   async recover(hooks?: RecoverHooks): Promise<RecoveryReport> {
-    if (!this._needsRecovery) return EMPTY_REPORT
-
-    const report: RecoveryReport = { recovered: true, reissued: [], unknownOutcome: [], note: "" }
+    // This pass is the model-request boundary's reconciliation, so it runs
+    // unconditionally rather than trusting the advisory `_needsRecovery`
+    // latch: a dangling call can be present while the latch is false (see
+    // `replaceMessages`). It is idempotent and reports `recovered` only when
+    // it actually changed something.
+    const report: RecoveryReport = { recovered: false, reissued: [], unknownOutcome: [], note: "" }
 
     // 1. Running entries: unknown outcome — reissue only idempotent tools.
     for (const entry of [...this.ledger.all]) {
@@ -508,14 +526,33 @@ export class Session {
         await hooks.executeTool(this, assistantMsg, entry.name, entry.toolCallId, { ...entry.input }, { reissue: true })
         report.reissued.push({ toolCallId: entry.toolCallId, name: entry.name })
       } else {
-        // Orphaned entry — finalize defensively.
+        // No execution hook (or no assistant call to attach the outcome to):
+        // reconcile the pending invocation to an unknown terminal outcome
+        // rather than re-executing it.
         this.injectUnknownOutcome(entry.toolCallId, entry.name)
         report.unknownOutcome.push({ toolCallId: entry.toolCallId, name: entry.name, resolved: "injected-failed-result" })
-        this.ledger.finished(entry.toolCallId, "failed", { note: "orphaned ledger entry" })
+        // `injectUnknownOutcome` already finalizes an entry that has a
+        // matching call in history; only a true orphan (no assistant call) is
+        // left for this defensive finalization. Guard so one invocation is
+        // never terminalized twice.
+        const current = this.ledger.get(entry.toolCallId)
+        if (current?.status === "pending" || current?.status === "running") {
+          this.ledger.finished(entry.toolCallId, "failed", { note: "orphaned ledger entry" })
+        }
       }
     }
 
+    const didWork = report.reissued.length > 0 || report.unknownOutcome.length > 0
+    if (!didWork && !this._needsRecovery) return EMPTY_REPORT
+
+    // Nothing is pending acknowledgement once a pass has run: clear the
+    // advisory latch. A flagged session with no execution state left to
+    // reconcile (e.g. an abort before any tool ran) is acknowledged silently —
+    // no note, no durable change, no recovery event.
     this._needsRecovery = false
+    if (!didWork) return EMPTY_REPORT
+
+    report.recovered = true
     report.note = buildRecoveryNote(report)
     this.pendingRecoveryNote = report.note
     await this.checkpoint()
