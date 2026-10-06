@@ -194,13 +194,18 @@ export class MiniCodeTui {
 					this.tui.requestRender()
 				})
 			},
-			ask: async label => {
+			ask: async (label, options) => {
+				const secret = options?.secret === true
 				return new Promise<string | null>(resolve => {
 					this.askState = { label, resolve: value => {
 						this.status.clear()
+						this.editor.setMasked(false)
 						this.tui.setFocus(this.editor)
 						resolve(value)
 					} }
+					// Secret prompts mask the composer so the typed value is never
+					// echoed; every resolution path (submit or Escape) clears it.
+					this.editor.setMasked(secret)
 					this.status.addChild(new Text(ansi.bold(label), 1, 0))
 					this.tui.setFocus(this.editor)
 					this.tui.requestRender()
@@ -401,8 +406,16 @@ export class MiniCodeTui {
 
 			const command = findCommand(name)
 			if (command !== undefined) {
-				await command.execute(this.commandContext, args)
-				// A command may change the active model (e.g. /model, /login), so
+				try {
+					await command.execute(this.commandContext, args)
+				} catch (error) {
+					// Model-management failures must surface as normal error
+					// notices, never as an uncaught stack trace over the TUI.
+					this.chat.addChild(errorNotice(
+						`/${name} failed: ${error instanceof Error ? error.message : String(error)}`,
+					))
+				}
+				// A command may change the active model (e.g. /model), so
 				// the footer's model identity and window are re-read here.
 				await this.refreshFooterData()
 				this.tui.requestRender()

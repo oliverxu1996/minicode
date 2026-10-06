@@ -51,6 +51,20 @@ export class ModelManager {
   }
 
   /**
+   * A defensive copy of the stored configuration for `id`, or `undefined` when
+   * it is not configured.
+   *
+   * Exists so an edit flow can seed its prompts with the current values —
+   * including the endpoint and API key that {@link Model} deliberately hides —
+   * without exposing the manager's internal map. The returned object is a copy:
+   * mutating it cannot change the manager.
+   */
+  config(id: string): ModelConfig | undefined {
+    const config = this.configs.get(id.trim())
+    return config === undefined ? undefined : { ...config }
+  }
+
+  /**
    * Adds a model configuration. The configuration is validated, the id must
    * be unique, and the change is persisted before returning.
    *

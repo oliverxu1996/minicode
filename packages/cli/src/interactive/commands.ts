@@ -1,5 +1,6 @@
 import type { CompactionOutcome, Session, Skill } from "@minicode/agent"
 import { trustProject } from "@minicode/agent"
+import type { ModelConfig } from "@minicode/model"
 
 /**
  * Outcome of a manual `/compact`, including cases the compaction layer cannot
@@ -23,8 +24,9 @@ export interface CommandContext {
   notify(text: string, isError?: boolean): void
   /** Opens an inline selector and resolves with the chosen value. */
   pick(title: string, items: Array<{ value: string; label: string; description?: string }>): Promise<string | null>
-  /** Prompts for a single line of input (status-prompt style). */
-  ask(label: string): Promise<string | null>
+  /** Prompts for a single line of input (status-prompt style). `secret` masks
+   *  the typed text so credentials are never echoed. */
+  ask(label: string, options?: { secret?: boolean }): Promise<string | null>
   /** Runs the model-based context compaction immediately. */
   compact(): Promise<CompactResult>
   /** Submits a task through the normal run path (used by templates). */
@@ -79,6 +81,218 @@ function exportPath(session: Session, path: string | undefined): string {
   return `${session.cwd}/minicode-session-${short}.jsonl`
 }
 
+// ── model management (/model) ────────────────────────────────────────
+//
+// The user-facing concept is the configured Model, not a login: `/model`
+// selects the active model and is the single entry point for adding, editing,
+// and removing configurations. The runtime store (ModelManager) is the source
+// of truth; these helpers only drive the picker/prompt interaction.
+
+/** Picker action values. Control-character prefixed so they can never collide
+ *  with a user-chosen model id. */
+const MODEL_ADD = "\u0000model:add"
+const MODEL_EDIT = "\u0000model:edit"
+const MODEL_REMOVE = "\u0000model:remove"
+const MODEL_CONFIGURE = "\u0000model:configure"
+
+/** A user-facing message derived from a thrown value. Never contains secrets:
+ *  ModelError messages carry no API key (see @minicode/model). */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+type ModelPromptResult =
+  | { readonly kind: "config"; readonly config: ModelConfig }
+  | { readonly kind: "cancelled" }
+  | { readonly kind: "error"; readonly message: string }
+
+/** Picker over the configured models. Returns the chosen id, or null when there
+ *  are none or the user cancels. */
+async function pickModelId(ctx: CommandContext, title: string): Promise<string | null> {
+  const models = (await ctx.agent().modelManager()).list()
+  if (models.length === 0) return null
+  const active = (await ctx.agent().currentModel())?.id
+  return ctx.pick(title, models.map(m => ({
+    value: m.id,
+    label: m.id,
+    description: m.id === active ? "active" : undefined,
+  })))
+}
+
+/**
+ * Runs the model-configuration prompts. `base` seeds an edit with the current
+ * values; when absent the flow adds a new model. Returns a discriminated result
+ * so the caller can report cancellation, validation failure, and success
+ * distinctly — pressing Escape is never reported as a validation error.
+ */
+async function promptModelConfig(ctx: CommandContext, base?: ModelConfig): Promise<ModelPromptResult> {
+  const editing = base !== undefined
+  const cancelled: ModelPromptResult = { kind: "cancelled" }
+  const invalid = (message: string): ModelPromptResult => ({ kind: "error", message })
+
+  const protocolRaw = await ctx.ask(editing ? `protocol (default ${base.protocol}):` : "protocol — openai or anthropic:")
+  if (protocolRaw === null) return cancelled
+  const protocol = protocolRaw.trim() || (editing ? base.protocol : "")
+  if (protocol !== "openai" && protocol !== "anthropic") {
+    return invalid("protocol must be openai or anthropic")
+  }
+
+  const defaultEndpoint = protocol === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com/v1"
+  const endpointDefault = editing && base.protocol === protocol ? base.endpoint : defaultEndpoint
+  const endpointRaw = await ctx.ask(`endpoint (default ${endpointDefault}):`)
+  if (endpointRaw === null) return cancelled
+  const endpoint = endpointRaw.trim() || endpointDefault
+
+  let id: string
+  if (editing) {
+    // `ModelManager.update` replaces the configuration of an existing id; the
+    // id is the identity and is not changed by an edit.
+    id = base.id
+  } else {
+    const idRaw = await ctx.ask("model id (short name used by /model):")
+    if (idRaw === null) return cancelled
+    id = idRaw.trim()
+    if (id.length === 0) return invalid("model id is required")
+  }
+
+  const modelRaw = await ctx.ask(editing
+    ? `provider model name (default ${base.model}):`
+    : "provider model name (e.g. gpt-4.1 / claude-sonnet-4-5):")
+  if (modelRaw === null) return cancelled
+  const model = modelRaw.trim() || (editing ? base.model : "")
+  if (model.length === 0) return invalid("provider model name is required")
+
+  const apiKeyRaw = await ctx.ask(editing ? "api key (blank keeps current):" : "api key:", { secret: true })
+  if (apiKeyRaw === null) return cancelled
+  const apiKey = apiKeyRaw.trim().length === 0 ? (editing ? base.apiKey : "") : apiKeyRaw.trim()
+
+  const contextRaw = await ctx.ask(`context window in tokens (default ${editing ? base.contextWindow : 128000}):`)
+  if (contextRaw === null) return cancelled
+  const contextWindow = Number(contextRaw.trim()) > 0 ? Number(contextRaw.trim()) : (editing ? base.contextWindow : 128000)
+
+  const maxOutRaw = await ctx.ask(`max output tokens (default ${editing ? base.maxOutputTokens : 8192}):`)
+  if (maxOutRaw === null) return cancelled
+  const maxOutputTokens = Number(maxOutRaw.trim()) > 0 ? Number(maxOutRaw.trim()) : (editing ? base.maxOutputTokens : 8192)
+
+  return {
+    kind: "config",
+    config: { id, name: editing ? base.name : id, protocol, endpoint, model, apiKey, contextWindow, maxOutputTokens },
+  }
+}
+
+/** Configures and activates a new model. */
+async function addModel(ctx: CommandContext): Promise<void> {
+  const result = await promptModelConfig(ctx)
+  if (result.kind === "cancelled") {
+    ctx.notify("cancelled")
+    return
+  }
+  if (result.kind === "error") {
+    ctx.notify(result.message, true)
+    return
+  }
+  try {
+    await ctx.agent().configureModel(result.config)
+    ctx.notify(`model "${result.config.id}" configured and activated`)
+  } catch (error) {
+    ctx.notify(`cannot configure model: ${errorMessage(error)}`, true)
+  }
+}
+
+/** Replaces an existing model's configuration via `ModelManager.update`. */
+async function editModel(ctx: CommandContext, id: string): Promise<void> {
+  const base = (await ctx.agent().modelManager()).config(id)
+  if (base === undefined) {
+    ctx.notify(`model "${id}" is not configured`, true)
+    return
+  }
+  const result = await promptModelConfig(ctx, base)
+  if (result.kind === "cancelled") {
+    ctx.notify("cancelled")
+    return
+  }
+  if (result.kind === "error") {
+    ctx.notify(result.message, true)
+    return
+  }
+  try {
+    // Re-read the manager so the update is applied to the latest state.
+    ;(await ctx.agent().modelManager()).update(result.config)
+    ctx.notify(`model "${result.config.id}" updated`)
+  } catch (error) {
+    ctx.notify(`cannot update model: ${errorMessage(error)}`, true)
+  }
+}
+
+/** Explicit confirmation before a removal. */
+async function confirmRemoval(ctx: CommandContext, id: string): Promise<boolean> {
+  const choice = await ctx.pick("Remove model", [
+    { value: "remove", label: `Remove "${id}"` },
+    { value: "cancel", label: "Cancel" },
+  ])
+  return choice === "remove"
+}
+
+/**
+ * Removes a model after confirmation. Removing the active model while others
+ * remain requires the user to pick the replacement explicitly; cancelling that
+ * choice abandons the removal rather than leaving an arbitrary active model.
+ * Removing the last model leaves no active model, which is valid.
+ */
+async function removeModel(ctx: CommandContext, id: string): Promise<void> {
+  const models = (await ctx.agent().modelManager()).list()
+  if (!models.some(m => m.id === id)) {
+    ctx.notify(`model "${id}" is not configured`, true)
+    return
+  }
+  if (!(await confirmRemoval(ctx, id))) {
+    ctx.notify("cancelled")
+    return
+  }
+
+  const active = (await ctx.agent().currentModel())?.id
+  const remaining = models.filter(m => m.id !== id)
+  let replacement: string | null = null
+  if (id === active && remaining.length > 0) {
+    replacement = await ctx.pick("Activate model", remaining.map(m => ({ value: m.id, label: m.id })))
+    if (replacement === null) {
+      ctx.notify("cancelled")
+      return
+    }
+  }
+
+  try {
+    const manager = await ctx.agent().modelManager()
+    manager.remove(id)
+    if (replacement !== null) manager.activate(replacement)
+    ctx.notify(replacement !== null
+      ? `removed model "${id}" — active model: ${replacement}`
+      : `removed model "${id}"`)
+  } catch (error) {
+    ctx.notify(`cannot remove model: ${errorMessage(error)}`, true)
+  }
+}
+
+/** The Configure submenu, shared by `/model` and the add/edit/remove paths. */
+async function openConfigureMenu(ctx: CommandContext): Promise<void> {
+  const models = (await ctx.agent().modelManager()).list()
+  const items: Array<{ value: string; label: string }> = [{ value: MODEL_ADD, label: "Add model…" }]
+  if (models.length > 0) {
+    items.push({ value: MODEL_EDIT, label: "Edit model…" })
+    items.push({ value: MODEL_REMOVE, label: "Remove model…" })
+  }
+  const action = await ctx.pick("Configure models", items)
+  if (action === MODEL_ADD) {
+    await addModel(ctx)
+  } else if (action === MODEL_EDIT) {
+    const id = await pickModelId(ctx, "Edit model")
+    if (id !== null) await editModel(ctx, id)
+  } else if (action === MODEL_REMOVE) {
+    const id = await pickModelId(ctx, "Remove model")
+    if (id !== null) await removeModel(ctx, id)
+  }
+}
+
 export const COMMANDS: Command[] = [
   {
     name: "help",
@@ -93,77 +307,90 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "model",
-    description: "Switch the active model",
-    argumentHint: "[model-id]",
+    description: "Select, add, edit, or remove models",
+    argumentHint: "[add | edit <id> | remove <id> | <model-id>]",
     async execute(ctx, args) {
       const agent = ctx.agent()
-      if (args.trim().length > 0) {
-        await agent.activateModel(args.trim())
-        ctx.notify(`active model: ${args.trim()}`)
+      const trimmed = args.trim()
+
+      if (trimmed === "add") {
+        await addModel(ctx)
         return
       }
-      const manager = await agent.modelManager()
-      const models = manager.list()
+      if (trimmed === "edit" || trimmed.startsWith("edit ")) {
+        const id = trimmed.slice("edit".length).trim()
+        if (id.length === 0) {
+          ctx.notify("usage: /model edit <model-id>", true)
+          return
+        }
+        await editModel(ctx, id)
+        return
+      }
+      if (trimmed === "remove" || trimmed.startsWith("remove ")) {
+        const id = trimmed.slice("remove".length).trim()
+        if (id.length === 0) {
+          ctx.notify("usage: /model remove <model-id>", true)
+          return
+        }
+        await removeModel(ctx, id)
+        return
+      }
+      // Direct selection by id.
+      if (trimmed.length > 0) {
+        try {
+          await agent.activateModel(trimmed)
+          ctx.notify(`active model: ${trimmed}`)
+        } catch (error) {
+          ctx.notify(`cannot activate model: ${errorMessage(error)}`, true)
+        }
+        return
+      }
+
+      const models = (await agent.modelManager()).list()
+      // An empty store must offer an actionable path, not an unusable picker.
       if (models.length === 0) {
-        ctx.notify("no models configured — use /login to add one", true)
+        const action = await ctx.pick("Model", [{ value: MODEL_ADD, label: "Add model…" }])
+        if (action === MODEL_ADD) await addModel(ctx)
         return
       }
+
       const active = (await agent.currentModel())?.id
-      const chosen = await ctx.pick(
-        "Select model",
-        models.map(m => ({
+      const chosen = await ctx.pick("Model", [
+        ...models.map(m => ({
           value: m.id,
           label: m.id,
           description: m.id === active ? "active" : undefined,
         })),
-      )
+        { value: MODEL_CONFIGURE, label: "Configure models…" },
+      ])
       if (chosen === null) return
-      agent.activateModel(chosen)
-      ctx.notify(`active model: ${chosen}`)
+      if (chosen === MODEL_CONFIGURE) {
+        await openConfigureMenu(ctx)
+        return
+      }
+      try {
+        await agent.activateModel(chosen)
+        ctx.notify(`active model: ${chosen}`)
+      } catch (error) {
+        ctx.notify(`cannot activate model: ${errorMessage(error)}`, true)
+      }
     },
   },
   {
     name: "login",
-    description: "Configure a model (protocol, endpoint, credentials)",
+    description: "Deprecated alias for /model add",
     async execute(ctx) {
-      const agent = ctx.agent()
-      const protocol = (await ctx.ask("protocol — openai or anthropic:"))?.trim()
-      if (protocol !== "openai" && protocol !== "anthropic") {
-        ctx.notify("cancelled: protocol must be openai or anthropic", true)
-        return
-      }
-      const defaultEndpoint =
-        protocol === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com/v1"
-      const endpoint = (await ctx.ask(`endpoint (default ${defaultEndpoint}):`))?.trim() || defaultEndpoint
-      const id = (await ctx.ask("model id (short name used by /model):"))?.trim()
-      const model = (await ctx.ask("provider model name (e.g. gpt-4.1 / claude-sonnet-4-5):"))?.trim()
-      const apiKey = await ctx.ask("api key:")
-      const contextWindowRaw = (await ctx.ask("context window in tokens (default 128000):"))?.trim()
-      const maxOutRaw = (await ctx.ask("max output tokens (default 8192):"))?.trim()
-      if (!id || !model || apiKey === null) {
-        ctx.notify("cancelled: missing fields", true)
-        return
-      }
-      const contextWindow = Number(contextWindowRaw) > 0 ? Number(contextWindowRaw) : 128000
-      const maxOutputTokens = Number(maxOutRaw) > 0 ? Number(maxOutRaw) : 8192
-      await agent.configureModel({ id, name: id, protocol, endpoint, model, apiKey, contextWindow, maxOutputTokens })
-      ctx.notify(`model "${id}" configured and activated`)
+      ctx.notify("login is deprecated — use /model add")
+      await addModel(ctx)
     },
   },
   {
     name: "logout",
-    description: "Remove a configured model",
+    description: "Deprecated alias for /model remove",
     async execute(ctx) {
-      const agent = ctx.agent()
-      const manager = await agent.modelManager()
-      const models = manager.list()
-      const chosen = await ctx.pick(
-        "Remove model",
-        models.map(m => ({ value: m.id, label: m.id })),
-      )
-      if (chosen === null) return
-      agent.removeModel(chosen)
-      ctx.notify(`removed model "${chosen}"`)
+      ctx.notify("logout is deprecated — use /model remove")
+      const id = await pickModelId(ctx, "Remove model")
+      if (id !== null) await removeModel(ctx, id)
     },
   },
   {
@@ -232,7 +459,7 @@ export const COMMANDS: Command[] = [
           ctx.notify(`compaction failed: ${result.error}`, true)
           break
         case "no-model":
-          ctx.notify("no model configured — run /login", true)
+          ctx.notify("no model configured — use /model add", true)
           break
         case "busy":
           ctx.notify(result.reason === "running"

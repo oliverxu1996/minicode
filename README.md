@@ -76,7 +76,7 @@ cd ~/my-project
 minicode
 ```
 
-On first launch, use `/login` to configure a model, then type a task.
+On first launch, use `/model` to configure a model, then type a task.
 
 ### Running from source
 
@@ -91,7 +91,7 @@ bun install
 bun ./packages/cli/src/main.ts /path/to/your/project
 ```
 
-On first launch no model is configured. Use `/login` to set one up — MiniCode asks for the protocol (`openai` or `anthropic`), the endpoint, a provider model name, your API key, and token limits. The configuration is saved locally, and you can switch models later with `/model` or Ctrl+P.
+On first launch no model is configured. Use `/model` to set one up — MiniCode asks for the protocol (`openai` or `anthropic`), the endpoint, a provider model name, your API key, and token limits. The configuration is saved locally, and you can switch models later with `/model` or Ctrl+P.
 
 Then type a task, press Enter, and watch it work.
 
@@ -108,10 +108,13 @@ Model-related commands:
 
 | Command | Purpose |
 | --- | --- |
-| `/login` | Configure a model interactively |
-| `/model [id]` | Switch the active model |
-| `/logout` | Remove a configured model |
+| `/model` | Select the active model, or open `Configure models…` to add, edit, or remove one |
+| `/model add` | Configure a new model interactively |
+| `/model edit <id>` | Edit a configured model |
+| `/model remove <id>` | Remove a configured model |
 | Ctrl+P | Cycle through configured models |
+
+`/login` and `/logout` remain as deprecated aliases for `/model add` and `/model remove`.
 
 Configuration is persisted locally under your config directory
 (`~/.minicode/models.json`) — you can also edit that file directly.
@@ -143,7 +146,7 @@ If MiniCode is interrupted mid-task, the next start reconciles the interrupted w
 | `/name <title>` | Name the current session |
 | `/session` | Show session info and statistics |
 | `/new` · `/resume` · `/fork` · `/clone` · `/tree` | Session lifecycle and navigation |
-| `/login` · `/logout` · `/model` | Model configuration |
+| `/model` | Model selection and configuration |
 | `/trust` · `/reload` | Project resources |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/quit` | Exit |

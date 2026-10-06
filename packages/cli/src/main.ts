@@ -25,7 +25,7 @@ import { runPrint } from "./print"
  *
  * The workspace directory defaults to the current directory. Model
  * configuration comes from `@minicode/model` ModelManager (the configured
- * active model) — or use /login inside the TUI on first run.
+ * active model) — or use /model inside the TUI on first run.
  *
  * Interactive mode needs a terminal, so it is refused when stdin is not a TTY
  * (see `runCli`); use -p for scripts, pipes, and CI.
@@ -111,7 +111,7 @@ usage: minicode [options] [workspace]
   -v, --version        print the MiniCode version
   -h, --help           show this help
 
-first run: use /login inside the TUI to configure a model
+first run: use /model inside the TUI to configure a model
 (protocol, endpoint, model name, API key), or write
 ~/.minicode/models.json directly.`
 }

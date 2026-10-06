@@ -15,9 +15,9 @@ cd my-project
 minicode
 ```
 
-On first launch no model is configured — use `/login` to set one up
+On first launch no model is configured — use `/model` to set one up
 (protocol `openai` or `anthropic`, endpoint, model name, API key, token
-limits), then type a task.
+limits), then type a task. `/model` also adds, edits, and removes models.
 
 ## Scripting
 

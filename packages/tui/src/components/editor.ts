@@ -242,6 +242,12 @@ export interface EditorTheme {
 export interface EditorOptions {
 	paddingX?: number;
 	autocompleteMaxVisible?: number;
+	/**
+	 * Render the entered text masked (each code unit as `*`) so a secret such as
+	 * an API key is never echoed. Input handling, cursor movement, and submit
+	 * semantics are unchanged; autocomplete is suppressed while masked.
+	 */
+	masked?: boolean;
 }
 
 const SLASH_COMMAND_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
@@ -366,6 +372,9 @@ export class Editor implements Component, Focusable {
 	// Undo support
 	private undoStack = new UndoStack<EditorSnapshot>();
 
+	// Secret input: mask the rendered text without changing input semantics.
+	private masked: boolean = false;
+
 	public onSubmit?: (text: string) => void;
 	public onChange?: (text: string) => void;
 	public disableSubmit: boolean = false;
@@ -378,6 +387,23 @@ export class Editor implements Component, Focusable {
 		this.paddingX = Number.isFinite(paddingX) ? Math.max(0, Math.floor(paddingX)) : 0;
 		const maxVisible = options.autocompleteMaxVisible ?? 5;
 		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
+		this.masked = options.masked === true;
+	}
+
+	/**
+	 * Toggle masked rendering. Entering masked mode cancels any active
+	 * autocomplete so a secret is never offered completions or intercepted.
+	 */
+	setMasked(masked: boolean): void {
+		const next = masked === true;
+		if (this.masked === next) return;
+		this.masked = next;
+		if (next) this.cancelAutocomplete();
+		this.tui.requestRender();
+	}
+
+	isMasked(): boolean {
+		return this.masked;
 	}
 
 	/** Set of currently valid paste IDs, for marker-aware segmentation. */
@@ -569,8 +595,11 @@ export class Editor implements Component, Focusable {
 		const emitCursorMarker = this.focused;
 
 		for (const layoutLine of visibleLines) {
-			let displayText = layoutLine.text;
-			let lineVisibleWidth = visibleWidth(layoutLine.text);
+			// Masked mode replaces every code unit with `*`, preserving the
+			// code-unit offsets the cursor logic below slices on, so the cursor
+			// still points at the same position while nothing is revealed.
+			let displayText = this.masked ? "*".repeat(layoutLine.text.length) : layoutLine.text;
+			let lineVisibleWidth = visibleWidth(displayText);
 			let cursorInPadding = false;
 
 			// Add cursor if this line has it
@@ -616,7 +645,7 @@ export class Editor implements Component, Focusable {
 
 		// Add autocomplete list if active
 		this.renderedAutocompleteHeight = 0;
-		if (this.autocompleteState && this.autocompleteList) {
+		if (this.autocompleteState && this.autocompleteList && !this.masked) {
 			const autocompleteResult = this.autocompleteList.render(contentWidth);
 			this.renderedAutocompleteHeight = autocompleteResult.length;
 			for (const line of autocompleteResult) {
@@ -2285,6 +2314,8 @@ export class Editor implements Component, Focusable {
 
 	private requestAutocomplete(options: { force: boolean; explicitTab: boolean }): void {
 		if (!this.autocompleteProvider) return;
+		// Never complete or intercept input while a secret is being entered.
+		if (this.masked) return;
 
 		if (options.force) {
 			const shouldTrigger =

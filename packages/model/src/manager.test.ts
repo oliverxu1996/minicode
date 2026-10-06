@@ -384,3 +384,39 @@ describe("ModelManager list and get", () => {
     })
   })
 })
+
+describe("ModelManager config", () => {
+  test("config returns the stored configuration for an existing id", async () => {
+    await withConfigDir(async () => {
+      const manager = await ModelManager.load()
+      const config = testConfig({ id: "a", name: "A" })
+      manager.add(config)
+
+      expect(manager.config("a")).toEqual(config)
+      // Ids are trimmed on lookup, like every other read.
+      expect(manager.config("  a  ")).toEqual(config)
+    })
+  })
+
+  test("config returns a copy, so mutating it cannot change the manager", async () => {
+    await withConfigDir(async () => {
+      const manager = await ModelManager.load()
+      manager.add(testConfig({ id: "a", name: "A" }))
+
+      const copy = { ...manager.config("a")! }
+      copy.name = "mutated"
+
+      expect(manager.config("a")?.name).toBe("A")
+      // And the copy did not reach disk either.
+      const reloaded = await ModelManager.load()
+      expect(reloaded.config("a")?.name).toBe("A")
+    })
+  })
+
+  test("config is undefined for an unknown id", async () => {
+    await withConfigDir(async () => {
+      const manager = await ModelManager.load()
+      expect(manager.config("ghost")).toBeUndefined()
+    })
+  })
+})
