@@ -58,10 +58,11 @@ export function stripSequences(value: string): string {
 }
 
 /**
- * Parse the renderer's emitted bytes into screen rows. `TuiAltScreen` writes
- * each changed row as `CSI <row>;1H [2K <line>`, so the last write per row wins.
+ * Parse the renderer's emitted bytes into screen rows, preserving ANSI codes.
+ * `TuiAltScreen` writes each changed row as `CSI <row>;1H [2K <line>`, so the
+ * last write per row wins.
  */
-export function parseScreen(raw: string, height: number): string[] {
+export function parseRawScreen(raw: string, height: number): string[] {
 	const screen = Array.from({ length: height }, () => "")
 	const marker = /\x1b\[(\d+);1H/g
 	const positions: Array<{ row: number; index: number; after: number }> = []
@@ -73,9 +74,14 @@ export function parseScreen(raw: string, height: number): string[] {
 		const { row, after } = positions[i]!
 		const end = i + 1 < positions.length ? positions[i + 1]!.index : raw.length
 		if (row < 0 || row >= height) continue
-		screen[row] = stripSequences(raw.slice(after, end)).trimEnd()
+		screen[row] = raw.slice(after, end)
 	}
 	return screen
+}
+
+/** Parse the emitted bytes into plain-text screen rows (ANSI stripped). */
+export function parseScreen(raw: string, height: number): string[] {
+	return parseRawScreen(raw, height).map(line => stripSequences(line).trimEnd())
 }
 
 /**
@@ -201,6 +207,13 @@ export class TuiHarness {
 		this.writes.length = 0
 		this.tui.renderNow(true)
 		return parseScreen(this.writes.join(""), this.rowsValue)
+	}
+
+	/** Force a full render and return the emitted rows with ANSI preserved. */
+	rawScreen(): string[] {
+		this.writes.length = 0
+		this.tui.renderNow(true)
+		return parseRawScreen(this.writes.join(""), this.rowsValue)
 	}
 
 	/** Conversation viewport state, for assertions. */

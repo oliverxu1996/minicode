@@ -1,5 +1,5 @@
-import { Container, Text, type Component } from "@minicode/tui"
-import { ansi } from "./theme"
+import { Box, Container, Text, type Component } from "@minicode/tui"
+import { ansi, surface } from "./theme"
 
 export interface SelectorItem {
   readonly value: string
@@ -8,9 +8,12 @@ export interface SelectorItem {
 }
 
 /**
- * Inline chat selector: arrow keys move, Enter confirms,
- * Escape cancels. Focusable through the `focused` flag so the TUI
- * forwards key input to it while open.
+ * Chat selector: arrow keys move, Enter confirms, Escape cancels. Focusable
+ * through the `focused` flag so the TUI forwards key input to it while open.
+ *
+ * Rendered as an opaque panel: the content is wrapped in a background `Box`, so
+ * when shown as an overlay it fully covers whatever is behind its bounds rather
+ * than floating as bare text over the conversation.
  */
 export class Selector implements Component {
   focused = false
@@ -18,6 +21,7 @@ export class Selector implements Component {
   onCancel?: () => void
 
   private readonly container = new Container()
+  private readonly panel = new Box(0, 0, surface)
   private index = 0
   private readonly rendered: string[] = []
 
@@ -25,6 +29,7 @@ export class Selector implements Component {
     readonly title: string,
     private readonly items: SelectorItem[],
   ) {
+    this.panel.addChild(this.container)
     this.rebuild()
   }
 
@@ -67,6 +72,6 @@ export class Selector implements Component {
 
   render(width: number): string[] {
     void this.rendered
-    return this.container.render(width)
+    return this.panel.render(width)
   }
 }

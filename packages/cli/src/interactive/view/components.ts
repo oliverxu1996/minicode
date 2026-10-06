@@ -1,6 +1,6 @@
 import { Box, Container, Markdown, Spacer, Text, type Component } from "@minicode/tui"
 import type { SessionMessage } from "@minicode/agent"
-import { ansi, markdownTheme } from "./theme"
+import { ansi, markdownTheme, surface } from "./theme"
 import { formatDuration } from "../../projection"
 
 /**
@@ -13,7 +13,7 @@ const MAX_RESULT_LINES = 500
 
 /** A submitted user task: markdown in a background-filled box. */
 export function userMessage(text: string): Component {
-	const box = new Box(1, 0, (line) => `\x1b[48;5;236m${line}\x1b[49m`)
+	const box = new Box(1, 0, surface)
 	box.addChild(
 		new Markdown(text.trim(), 0, 0, markdownTheme(), {
 			color: (content) => `\x1b[97m${content}\x1b[39m`,

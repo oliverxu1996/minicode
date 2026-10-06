@@ -18,6 +18,13 @@ export const ansi = {
 	gray: (text: string): string => `\x1b[90m${text}\x1b[39m`,
 }
 
+/**
+ * The one opaque panel background in the UI (256-color surface 236). It backs
+ * the user message box and transient selector overlays, so an overlay fully
+ * covers whatever is behind its bounds instead of floating as bare text.
+ */
+export const surface = (text: string): string => `\x1b[48;5;236m${text}\x1b[49m`
+
 export function markdownTheme(): MarkdownTheme {
 	return {
 		heading: (text) => ansi.bold(ansi.cyan(text)),

@@ -74,3 +74,28 @@ describe("/hotkeys documentation", () => {
     expect(submitLine).toContain("newline")
   })
 })
+
+describe("selector commands share the picker path", () => {
+  test("/model and /logout open the shared selector (which paints the opaque surface)", async () => {
+    // Both commands route through ctx.pick, and the picker builds a Selector,
+    // so the opaque surface applies uniformly rather than per command.
+    const pickedTitles: string[] = []
+    const ctx = {
+      agent: () => ({
+        modelManager: async () => ({ list: () => [{ id: "m1" }, { id: "m2" }] }),
+        currentModel: async () => ({ id: "m1" }),
+        removeModel: () => {},
+      }),
+      pick: async (title: string) => {
+        pickedTitles.push(title)
+        return null
+      },
+      notify: () => {},
+    } as unknown as CommandContext
+
+    await findCommand("model")!.execute(ctx, "")
+    await findCommand("logout")!.execute(ctx, "")
+
+    expect(pickedTitles).toEqual(["Select model", "Remove model"])
+  })
+})
