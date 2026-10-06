@@ -5,11 +5,16 @@ import { COMMANDS, findCommand, type CommandContext, type CompactResult } from "
 describe("commands (AC12)", () => {
   test("core commands exist with descriptions", () => {
     const names = COMMANDS.map(c => c.name)
-    for (const name of ["help", "model", "login", "logout", "new", "resume", "name", "session", "compact", "copy", "export", "import", "trust", "reload", "fork", "clone", "tree", "hotkeys", "quit"]) {
+    for (const name of ["help", "model", "new", "resume", "name", "session", "compact", "copy", "export", "import", "trust", "reload", "fork", "clone", "tree", "hotkeys", "quit"]) {
       expect(names).toContain(name)
     }
     expect(findCommand("model")?.description.length).toBeGreaterThan(0)
     expect(findCommand("nonexistent")).toBeUndefined()
+  })
+
+  test("the retired login/logout commands no longer exist", () => {
+    expect(findCommand("login")).toBeUndefined()
+    expect(findCommand("logout")).toBeUndefined()
   })
 })
 
@@ -78,8 +83,8 @@ describe("/hotkeys documentation", () => {
 
 describe("selector commands share the picker path", () => {
   test("every picker caller routes through ctx.pick with its title", async () => {
-    // All five commands route through ctx.pick, and the application renders the
-    // returned selector in the shared bottom-attached picker slot, so the
+    // Every picker caller routes through ctx.pick, and the application renders
+    // the returned selector in the shared bottom-attached picker slot, so the
     // presentation applies uniformly rather than per command.
     const pickedTitles: string[] = []
     const now = Date.now()
@@ -110,14 +115,12 @@ describe("selector commands share the picker path", () => {
     } as unknown as CommandContext
 
     await findCommand("model")!.execute(ctx, "")
-    await findCommand("logout")!.execute(ctx, "")
     await findCommand("resume")!.execute(ctx, "")
     await findCommand("fork")!.execute(ctx, "")
     await findCommand("tree")!.execute(ctx, "")
 
     expect(pickedTitles).toEqual([
       "Model",
-      "Remove model",
       "Resume session",
       "Fork from message",
       "Forked sessions",
@@ -613,27 +616,3 @@ describe("wizard cancellation", () => {
   }
 })
 
-describe("compatibility aliases", () => {
-  test("/login maps to the add flow and announces the deprecation", async () => {
-    const h = modelHarness({ askResults: ["", "gpt-5", "sk"], pick: wizard() })
-    await findCommand("login")!.execute(h.ctx, "")
-    expect(h.notices[0]).toEqual({ text: "login is deprecated — use /model add", isError: false })
-    expect(h.calls.configured).toHaveLength(1)
-    expect(h.calls.configured[0]!.id).toBe("gpt-5")
-  })
-
-  test("/logout maps to the remove flow and announces the deprecation", async () => {
-    const h = modelHarness({
-      models: [{ id: "m1" }, { id: "m2" }],
-      active: "m1",
-      pick: call => {
-        if (call.title === "Remove model" && !call.items.some(i => i.value === "remove")) return "m2"
-        if (call.title === "Remove model") return "remove"
-        return null
-      },
-    })
-    await findCommand("logout")!.execute(h.ctx, "")
-    expect(h.notices[0]).toEqual({ text: "logout is deprecated — use /model remove", isError: false })
-    expect(h.calls.removed).toEqual(["m2"])
-  })
-})

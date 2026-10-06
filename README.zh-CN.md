@@ -74,7 +74,7 @@ cd ~/my-project
 minicode
 ```
 
-首次启动时没有配置模型，使用 `/login` 完成配置，然后输入任务。
+首次启动时没有配置模型，使用 `/model` 完成配置，然后输入任务。
 
 ### 从源码运行
 
@@ -89,7 +89,7 @@ bun install
 bun ./packages/cli/src/main.ts /path/to/your/project
 ```
 
-首次启动时没有配置任何模型。使用 `/login` 完成配置——MiniCode 会依次询问协议（`openai` 或 `anthropic`）、endpoint、提供商的模型名称、你的 API key 以及 token 上限。配置会保存在本地，之后可以随时用 `/model` 或 Ctrl+P 切换模型。
+首次启动时没有配置任何模型。使用 `/model` 完成配置——MiniCode 会依次询问协议（`openai` 或 `anthropic`）、endpoint、提供商的模型名称和你的 API key。上下文窗口和最大输出 token 会自动采用合理的默认值，仅在你需要时才通过可选的“Configure limits…”步骤调整。配置会保存在本地，之后可以随时用 `/model` 或 Ctrl+P 切换模型。
 
 然后输入一个任务，按下回车，看它开始工作。
 
@@ -106,9 +106,10 @@ MiniCode 支持两种协议，因此既可以对接官方 API，也可以对接�
 
 | 命令 | 用途 |
 | --- | --- |
-| `/login` | 交互式配置模型 |
-| `/model [id]` | 切换当前使用的模型 |
-| `/logout` | 移除已配置的模型 |
+| `/model` | 选择当前模型，或通过 `Configure models…` 添加、编辑、移除模型 |
+| `/model add` | 配置新模型（协议、endpoint、模型、API key；上限可选） |
+| `/model edit <id>` | 编辑已配置的模型 |
+| `/model remove <id>` | 移除已配置的模型 |
 | Ctrl+P | 在已配置的模型之间循环切换 |
 
 配置保存在你的配置目录下
@@ -141,7 +142,7 @@ MiniCode 支持两种协议，因此既可以对接官方 API，也可以对接�
 | `/name <title>` | 为当前会话命名 |
 | `/session` | 显示会话信息与统计 |
 | `/new` · `/resume` · `/fork` · `/clone` · `/tree` | 会话生命周期与导航 |
-| `/login` · `/logout` · `/model` | 模型配置 |
+| `/model` | 模型选择与配置 |
 | `/trust` · `/reload` | 项目资源 |
 | `/hotkeys` | 显示所有快捷键 |
 | `/quit` | 退出 |

@@ -88,10 +88,10 @@ function exportPath(session: Session, path: string | undefined): string {
 
 // ── model management (/model) ────────────────────────────────────────
 //
-// The user-facing concept is the configured Model, not a login: `/model`
-// selects the active model and is the single entry point for adding, editing,
-// and removing configurations. The runtime store (ModelManager) is the source
-// of truth; these helpers only drive the picker/prompt interaction.
+// `/model` is the sole model-management vocabulary: it selects the active model
+// and is the single entry point for adding, editing, and removing
+// configurations. The runtime store (ModelManager) is the source of truth;
+// these helpers only drive the picker/prompt interaction.
 
 /** Picker action values. Control-character prefixed so they can never collide
  *  with a user-chosen model id. */
@@ -473,23 +473,6 @@ export const COMMANDS: Command[] = [
       } catch (error) {
         ctx.notify(`cannot activate model: ${errorMessage(error)}`, true)
       }
-    },
-  },
-  {
-    name: "login",
-    description: "Deprecated alias for /model add",
-    async execute(ctx) {
-      ctx.notify("login is deprecated — use /model add")
-      await addModel(ctx)
-    },
-  },
-  {
-    name: "logout",
-    description: "Deprecated alias for /model remove",
-    async execute(ctx) {
-      ctx.notify("logout is deprecated — use /model remove")
-      const id = await pickModelId(ctx, "Remove model")
-      if (id !== null) await removeModel(ctx, id)
     },
   },
   {

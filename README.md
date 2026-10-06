@@ -114,8 +114,6 @@ Model-related commands:
 | `/model remove <id>` | Remove a configured model |
 | Ctrl+P | Cycle through configured models |
 
-`/login` and `/logout` remain as deprecated aliases for `/model add` and `/model remove`.
-
 Configuration is persisted locally under your config directory
 (`~/.minicode/models.json`) — you can also edit that file directly.
 

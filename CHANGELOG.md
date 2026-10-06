@@ -4,7 +4,12 @@ All notable changes to MiniCode will be documented in this file.
 
 ## [Unreleased]
 
-Nothing yet.
+### Removed
+
+- Slash commands `/login` and `/logout`. They were never authentication —
+  they configured and removed local models. `/model` is now the sole
+  model-management vocabulary (`/model`, `/model add`, `/model edit <id>`,
+  `/model remove <id>`).
 
 ## [0.1.0] - 2026-09-27
 
