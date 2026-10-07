@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Text, type Component } from "@minicode/tui"
+import { Session } from "@minicode/agent"
 import { displayWidth } from "../../projection"
 import { TuiHarness } from "./testing"
 import {
@@ -72,6 +73,9 @@ function horizontalPadding(line: string): { left: number; right: number } {
 	const trailing = visible.length - visible.trimEnd().length
 	return { left: displayWidth(visible.slice(0, leading)), right: displayWidth(visible.slice(visible.length - trailing)) }
 }
+
+/** Strip the scrollbar glyph the renderer paints over the last column. */
+const cleanRow = (line: string): string => line.replace(/[│┃]\s*$/, "").trimEnd()
 
 const PTY_MATRIX: ReadonlyArray<readonly [number, number]> = [
 	[100, 30],
@@ -219,6 +223,36 @@ describe("hello banner — component", () => {
 		height = 5
 		expect(component.render(80)).toEqual(headerLines(80, 5))
 	})
+
+	test("omitting the visibility predicate keeps the header rendered", () => {
+		const component = helloHeader({ label: LABEL, hints: KEYBOARD_HINTS, availableHeight: () => 19 })
+		expect(component.render(80).length).toBeGreaterThan(0)
+	})
+
+	test("a false visibility predicate contributes zero rows", () => {
+		const component = helloHeader({
+			label: LABEL,
+			hints: KEYBOARD_HINTS,
+			availableHeight: () => 19,
+			visible: () => false,
+		})
+		expect(component.render(80)).toEqual([])
+	})
+
+	test("visibility is re-read on every render", () => {
+		let visible = true
+		const component = helloHeader({
+			label: LABEL,
+			hints: KEYBOARD_HINTS,
+			availableHeight: () => 19,
+			visible: () => visible,
+		})
+		expect(component.render(80)).toEqual(headerLines(80, 19))
+		visible = false
+		expect(component.render(80)).toEqual([])
+		visible = true
+		expect(component.render(80)).toEqual(headerLines(80, 19))
+	})
 })
 
 describe("hello banner — transcript integration", () => {
@@ -237,22 +271,6 @@ describe("hello banner — transcript integration", () => {
 		expect(rows.at(-3)).toMatch(/^─+$/) // composer bottom border
 		expect(rows.at(-4)).toBe("") // composer content
 		expect(rows.at(-5)).toMatch(/^─+$/) // composer top border
-	})
-
-	test("conversation history scrolls the banner away, and clearing restores it (/new)", () => {
-		const h = new TuiHarness({ width: 80, height: 24, chatLines: 0, headerComponent: header }).start()
-		expect(h.screen().join("\n")).toContain("█")
-
-		// A session with existing messages: the banner is transcript content, so
-		// it scrolls off rather than pinning as persistent chrome.
-		h.chat.count = 60
-		const busy = h.screen()
-		expect(busy.join("\n")).not.toContain("█")
-		expect(busy.at(-1)).toBe("FOOTER-2")
-
-		// `/new` clears the transcript; the empty-state banner naturally returns.
-		h.chat.count = 0
-		expect(h.screen().join("\n")).toContain("█")
 	})
 
 	test("the banner coexists with the status area and never displaces it", () => {
@@ -386,28 +404,131 @@ describe("hello banner — transcript-viewport centering integration (PTY matrix
 		expect(grown.slice(0, grownExpected.length)).toEqual(grownExpected)
 		expect(grown.at(-1)).toBe("FOOTER-2")
 	})
+})
 
-	test("once conversation begins the hero is transcript content, not fixed chrome", () => {
+describe("hello banner — empty-state lifecycle", () => {
+	/**
+	 * A harness whose hero is driven by the real app predicate,
+	 * `session.messages.length === 0 && !running`, evaluated against an actual
+	 * `Session` and a mutable run flag.
+	 *
+	 * `session.current` can be replaced to model `/new` or a session switch, so
+	 * the tests exercise the exact expression the app wires in `app.ts`.
+	 */
+	function heroHarness(options: {
+		messages?: number
+		running?: boolean
+		width?: number
+		height?: number
+		chatLines?: number
+		statusRows?: number
+	}): { h: TuiHarness; session: { current: Session }; state: { running: boolean } } {
+		const session = { current: Session.create({ cwd: LABEL }) }
+		for (let i = 0; i < (options.messages ?? 0); i++) session.current.pushUser(`message ${i}`)
+		const state = { running: options.running ?? false }
 		const h = new TuiHarness({
-			width: 80,
-			height: 24,
-			chatLines: 0,
-			headerComponent: terminal => liveBanner(terminal),
+			width: options.width ?? 80,
+			height: options.height ?? 24,
+			chatLines: options.chatLines ?? 0,
+			statusRows: options.statusRows,
+			headerComponent: terminal =>
+				helloHeader({
+					label: LABEL,
+					hints: KEYBOARD_HINTS,
+					availableHeight: () => transcriptHeight(terminal.rows),
+					visible: () => session.current.messages.length === 0 && !state.running,
+				}),
 		}).start()
+		return { h, session, state }
+	}
+
+	test("A. an empty, idle session renders the centered hero", () => {
+		const { h } = heroHarness({ messages: 0, running: false })
+		const rows = h.screen()
+		expect(rows.join("\n")).toContain("█")
+		expect(rows.join("\n")).toContain(DESCRIPTOR)
+	})
+
+	test("B. a submission hides the hero before and after the message lands", () => {
+		const { h, session, state } = heroHarness({ messages: 0 })
 		expect(h.screen().join("\n")).toContain("█")
 
-		// Growing output scrolls the centered hero off; the chrome stays pinned.
-		h.chat.count = 40
-		const busy = h.screen()
-		expect(busy.join("\n")).not.toContain("█")
-		expect(busy.at(-1)).toBe("FOOTER-2")
-		expect(busy.at(-2)).toBe("FOOTER-1")
+		// `running` flips synchronously when submission starts, before the
+		// session records the user message, so the hero is gone immediately.
+		state.running = true
+		expect(h.screen().join("\n")).not.toContain("█")
 
-		// `/new` clears the transcript and restores the same centered hero.
-		h.chat.count = 0
-		const restored = h.screen()
-		const expected = renderedHeader(80, transcriptHeight(24))
-		expect(restored.slice(0, expected.length)).toEqual(expected)
+		// The runtime records the message; the durable predicate keeps it hidden.
+		session.current.pushUser("Fix the authentication bug.")
+		state.running = false
+		expect(h.screen().join("\n")).not.toContain("█")
+	})
+
+	test("C. a session with messages has no hero in its transcript content", () => {
+		const { h } = heroHarness({ messages: 1, chatLines: 60 })
+		// At the very top of the scroll content the first item is conversation,
+		// not the hero. The original bug was the hero being reachable here.
+		h.feed("\x1b[1~") // Home
+		const rows = h.screen()
+		expect(cleanRow(rows[0]!)).toBe("chat-0")
+		expect(rows.join("\n")).not.toContain("█")
+		expect(rows.join("\n")).not.toContain("MINICODE")
+	})
+
+	test("D. /new restores the hero, and a notice does not suppress it", () => {
+		const { h, session } = heroHarness({ messages: 1, chatLines: 12 })
+		expect(h.screen().join("\n")).not.toContain("█")
+
+		// `/new` swaps in an empty session and also appends a "started a new
+		// session" notice. Emptiness is the session's, not the chat container's,
+		// so the notice must not keep the hero hidden.
+		session.current = Session.create({ cwd: LABEL })
+		h.chat.count = 1 // the notice
+		const rows = h.screen()
+		expect(rows.join("\n")).toContain("█")
+		expect(rows.join("\n")).toContain("chat-0")
+	})
+
+	test("E. a short session that fits the viewport still shows no hero", () => {
+		const { h } = heroHarness({ messages: 2, chatLines: 3 })
+		const rows = h.screen()
+		expect(cleanRow(rows[0]!)).toBe("chat-0")
+		expect(rows.join("\n")).not.toContain("█")
+	})
+
+	test("F. a long session's hero cannot be revealed through scrollback", () => {
+		const { h } = heroHarness({ messages: 2, chatLines: 80 })
+		// Home, then further upward attempts: nothing above chat-0.
+		for (const key of ["\x1b[1~", "\x1b[5~", "\x1b[<64;10;10M"]) h.feed(key)
+		const rows = h.screen()
+		expect(cleanRow(rows[0]!)).toBe("chat-0")
+		expect(rows.join("\n")).not.toContain("█")
+	})
+
+	test("G. hiding the hero leaves the bottom chrome and focus unchanged", () => {
+		const { h } = heroHarness({ messages: 2, chatLines: 40, statusRows: 2 })
+		const rows = h.screen()
+		expect(rows.at(-1)).toBe("FOOTER-2")
+		expect(rows.at(-2)).toBe("FOOTER-1")
+		expect(rows.at(-3)).toMatch(/^─+$/) // composer bottom border
+		expect(rows.at(-5)).toMatch(/^─+$/) // composer top border
+		expect(rows.join("\n")).toContain("STATUS-0")
+		expect(h.tui.getFocusedComponent()).toBe(h.editor)
+	})
+
+	test("H. resize keeps a visible hero centered and a hidden hero absent", () => {
+		const visible = heroHarness({ messages: 0 })
+		visible.h.resize(46, 20)
+		const viewport = transcriptHeight(20)
+		const expected = renderedHeader(46, viewport)
+		assertVerticallyCentered(expected, viewport)
+		expect(visible.h.screen().slice(0, expected.length)).toEqual(expected)
+
+		const hidden = heroHarness({ messages: 2, chatLines: 40 })
+		hidden.h.resize(100, 30)
+		const rows = hidden.h.screen()
+		expect(rows.join("\n")).not.toContain("█")
+		expect(rows.at(-1)).toBe("FOOTER-2")
 	})
 })
 

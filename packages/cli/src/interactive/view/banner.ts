@@ -263,8 +263,14 @@ export function renderHelloHeader(input: HelloHeaderInput): string[] {
 }
 
 /**
- * Width- and height-aware empty-state header component. Height is read lazily
- * from the live terminal so it reflects resizes without any lifecycle state.
+ * Width- and height-aware empty-state header component.
+ *
+ * `visible` is a live empty-state predicate: the caller supplies the session
+ * condition, and it is re-read on every render because both the session and the
+ * run state can change without the component being rebuilt. Height is likewise
+ * read lazily from the live terminal so it reflects resizes without any
+ * lifecycle state. A false predicate yields zero rows, so the hero is absent
+ * from the transcript rather than scrolled out of view.
  */
 export class HelloHeader implements Component {
 	constructor(
@@ -272,12 +278,21 @@ export class HelloHeader implements Component {
 			label: string
 			hints: string
 			availableHeight: () => number
+			/**
+			 * Whether the hero should render at all. When it returns false the
+			 * component contributes zero rows. Defaults to always visible, so a
+			 * caller that does not supply an empty-state condition renders the
+			 * banner unconditionally.
+			 */
+			visible?: () => boolean
 		},
 	) {}
 
 	invalidate(): void {}
 
 	render(width: number): string[] {
+		const visible = this.options.visible
+		if (visible !== undefined && !visible()) return []
 		return renderHelloHeader({
 			width,
 			availableHeight: this.options.availableHeight(),
@@ -292,6 +307,7 @@ export function helloHeader(options: {
 	label: string
 	hints: string
 	availableHeight: () => number
+	visible?: () => boolean
 }): Component {
 	return new HelloHeader(options)
 }

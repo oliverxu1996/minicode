@@ -166,16 +166,23 @@ export class MiniCodeTui {
 		this.tui = new TuiAltScreen(new ProcessTerminal(), false, undefined, { mouse: true })
 		this.session = options.session
 
-		// The header is the transcript's empty state: the hello banner while the
-		// transcript is empty, scrolling away as output grows, and naturally back
-		// after `/new` clears it. It is centered as a hero inside the transcript
-		// viewport, which is measured live from the fixed bottom chrome so a
-		// grown composer, an open picker, or a status row can never make the hero
-		// overshoot into the composer/footer. It never blocks the composer.
+		// The header is the transcript's true empty state: the hello banner is
+		// rendered only while the session holds no conversation messages. Once
+		// the first message exists the hero contributes zero rows, so the user's
+		// message — not the banner — is the first transcript item, and the banner
+		// can never be reached again through scrollback. `/new` and a switch to an
+		// empty session satisfy the same predicate, so the hero returns without
+		// any dedicated lifecycle flag. The live predicate reads the current
+		// session (never a captured one) and the synchronous `running` flag, which
+		// is already set when a submission begins, closing the window between
+		// appending the user's message and the session recording it. The hero is
+		// centered as a group inside the transcript viewport, measured live from
+		// the fixed bottom chrome; it never blocks the composer.
 		const header = helloHeader({
 			label: options.label ?? this.session.cwd,
 			hints: KEYBOARD_HINTS,
 			availableHeight: () => this.transcriptViewportHeight(),
+			visible: () => this.session.messages.length === 0 && !this.running,
 		})
 
 		this.editor = this.createEditor()
