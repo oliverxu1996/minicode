@@ -6,6 +6,13 @@ All notable changes to MiniCode will be documented in this file.
 
 ### Changed
 
+- `/model` is now a single command with no subcommands or argument forms. It
+  opens one picker that selects an existing configured model or offers
+  `Add model…`, which launches the guided configuration wizard. Model
+  selection still activates and persists through the runtime `ModelManager`;
+  Ctrl+P still cycles configured models. The `add`, `edit <id>`,
+  `remove <id>`, direct `<model-id>` activation, and `Configure models…`
+  forms are gone, and `/help` no longer advertises arguments.
 - `/session` is now the single interactive session-management surface. It
   opens a workspace-scoped manager for the current session's `cwd`, where
   sessions can be opened/switched, searched, renamed, deleted, forked,
@@ -16,9 +23,8 @@ All notable changes to MiniCode will be documented in this file.
 ### Removed
 
 - Slash commands `/login` and `/logout`. They were never authentication —
-  they configured and removed local models. `/model` is now the sole
-  model-management vocabulary (`/model`, `/model add`, `/model edit <id>`,
-  `/model remove <id>`).
+  they configured and removed local models. `/model` is now the sole model
+  surface (select or add).
 - Slash commands `/resume`, `/name`, `/tree`, `/fork`, and `/clone`. Their
   capabilities now live inside the `/session` manager; they are not retained
   as aliases.

@@ -106,11 +106,10 @@ MiniCode 支持两种协议，因此既可以对接官方 API，也可以对接�
 
 | 命令 | 用途 |
 | --- | --- |
-| `/model` | 选择当前模型，或通过 `Configure models…` 添加、编辑、移除模型 |
-| `/model add` | 配置新模型（协议、endpoint、模型、API key；上限可选） |
-| `/model edit <id>` | 编辑已配置的模型 |
-| `/model remove <id>` | 移除已配置的模型 |
+| `/model` | 选择已有模型，或通过 `Add model…` 配置新模型 |
 | Ctrl+P | 在已配置的模型之间循环切换 |
+
+`/model` 是唯一交互式模型界面。添加模型时会询问协议、endpoint、提供商模型和 API key，上下文窗口与最大输出 token 采用合理的默认值（可通过可选的 `Configure limits…` 步骤调整）。
 
 配置保存在你的配置目录下
 （`~/.minicode/models.json`）——你也可以直接编辑这个文件。
@@ -141,7 +140,7 @@ MiniCode 支持两种协议，因此既可以对接官方 API，也可以对接�
 | `/import <path>` | 从 JSONL 文件导入会话 |
 | `/session` | 管理当前工作区的会话（打开、搜索、重命名、删除、分叉、复制、相关） |
 | `/new` | 在当前工作区开始一个新会话 |
-| `/model` | 模型选择与配置 |
+| `/model` | 选择或添加模型 |
 | `/trust` · `/reload` | 项目资源 |
 | `/hotkeys` | 显示所有快捷键 |
 | `/quit` | 退出 |

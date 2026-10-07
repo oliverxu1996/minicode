@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
+import { MiniCode } from "@minicode/agent"
 import type { ModelConfig } from "@minicode/model"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { COMMANDS, findCommand, type CommandContext, type CompactResult } from "./commands"
 import { argumentPlaceholderFor } from "./input/argument-placeholder"
 import { MiniCodeAutocomplete } from "./input/autocomplete"
@@ -59,6 +63,63 @@ describe("commands (AC12)", () => {
     const state = (line: string) => ({ lines: [line], cursorLine: 0, cursorCol: line.length })
     expect(argumentPlaceholderFor(state("/name "), COMMANDS)).toBeUndefined()
     expect(argumentPlaceholderFor(state("/import "), COMMANDS)).toBe("Path…")
+  })
+
+  test("/model is a single command with no argument syntax", () => {
+    const model = findCommand("model")
+    expect(model).toBeDefined()
+    expect(model!.description).toBe("Select or add a model")
+    expect(model!.argumentHint).toBeUndefined()
+    expect(model!.argumentPlaceholder).toBeUndefined()
+  })
+
+  test("/model has no textual subcommands (add/edit/remove/configure/model-id)", async () => {
+    // Every former argument form must be rejected up front: no picker opens, no
+    // model is activated, and nothing is configured.
+    for (const arg of ["add", "edit m1", "remove m1", "m1", "configure", "edit", "remove"]) {
+      const notices: Array<{ text: string; isError: boolean }> = []
+      let picks = 0
+      const ctx = {
+        agent: () => ({
+          modelManager: async () => ({ list: () => [{ id: "m1" }] }),
+          currentModel: async () => ({ id: "m1" }),
+          activateModel: async () => { throw new Error("must not activate") },
+          configureModel: async () => { throw new Error("must not configure") },
+        }),
+        pick: async () => { picks += 1; return null },
+        notify: (text: string, isError?: boolean) => { notices.push({ text, isError: isError === true }) },
+      } as unknown as CommandContext
+
+      await findCommand("model")!.execute(ctx, arg)
+
+      expect(notices.at(-1)).toEqual({ text: "usage: /model", isError: true })
+      expect(picks).toBe(0)
+    }
+  })
+
+  test("/help advertises /model without argument syntax", () => {
+    const notices: string[] = []
+    const ctx = { notify: (text: string) => { notices.push(text) } } as unknown as CommandContext
+    findCommand("help")!.execute(ctx, "")
+    const help = notices.join("\n")
+    expect(help).toContain("/model — Select or add a model")
+    for (const stale of ["/model add", "/model edit", "/model remove", "Configure models", "[add |"]) {
+      expect(help).not.toContain(stale)
+    }
+  })
+
+  test("autocomplete proposes /model and never advertises subcommands", async () => {
+    const provider = new MiniCodeAutocomplete(
+      () => COMMANDS.map(command => ({ name: command.name, description: command.description })),
+      () => process.cwd(),
+    )
+    const all = await provider.getSuggestions(["/"], 0, 1)
+    expect(all!.items.map(item => item.label)).toContain("/model")
+
+    // Typing the command name yields only the command itself, never an
+    // `add`/`edit`/`remove` form.
+    const partial = await provider.getSuggestions(["/model"], 0, 6)
+    expect(partial!.items.map(item => item.label)).toEqual(["/model"])
   })
 })
 
@@ -168,20 +229,6 @@ interface ModelRecord {
   id: string
 }
 
-function baseConfig(overrides: Partial<ModelConfig> = {}): ModelConfig {
-  return {
-    id: "m1",
-    name: "m1",
-    protocol: "openai",
-    endpoint: "https://api.example.com/v1",
-    model: "gpt-4.1",
-    apiKey: "sk-existing",
-    contextWindow: 128000,
-    maxOutputTokens: 8192,
-    ...overrides,
-  }
-}
-
 interface PickCall {
   title: string
   items: Array<{ value: string; label: string; description?: string }>
@@ -195,9 +242,7 @@ interface ModelHarness {
   picks: PickCall[]
   calls: {
     configured: ModelConfig[]
-    updated: ModelConfig[]
     activated: string[]
-    removed: string[]
   }
   lastPickItems: Array<{ value: string; label: string; description?: string }>
 }
@@ -210,40 +255,23 @@ interface ModelHarness {
 function modelHarness(options: {
   models?: ModelRecord[]
   active?: string
-  configs?: Record<string, ModelConfig>
   askResults?: Array<string | null>
   pick?: (call: PickCall, index: number) => string | null
   failConfigure?: Error
-  failUpdate?: Error
-  failRemove?: Error
   failActivate?: Error
 }): ModelHarness {
   const notices: ModelHarness["notices"] = []
   const asks: ModelHarness["asks"] = []
-  const picks: ModelHarness["picks"] = []
-  const calls: ModelHarness["calls"] = { configured: [], updated: [], activated: [], removed: [] }
+  const picks: PickCall[] = []
+  const calls: ModelHarness["calls"] = { configured: [], activated: [] }
   const askResults = [...(options.askResults ?? [])]
   const models = options.models ?? []
   const byId = new Map(models.map(m => [m.id, m]))
-  const configs = options.configs ?? {}
   const lastPickItems: ModelHarness["lastPickItems"] = []
   let pickCall = 0
 
   const manager = {
     list: () => models.map(m => ({ id: m.id })),
-    config: (id: string) => configs[id],
-    update: (config: ModelConfig) => {
-      if (options.failUpdate) throw options.failUpdate
-      calls.updated.push(config)
-    },
-    activate: (id: string) => {
-      if (!byId.has(id)) throw new Error(`model "${id}" is not configured`)
-      calls.activated.push(id)
-    },
-    remove: (id: string) => {
-      if (options.failRemove) throw options.failRemove
-      calls.removed.push(id)
-    },
   }
 
   const ctx = {
@@ -291,33 +319,73 @@ function byLabel(call: PickCall, label: string): string | null {
 }
 
 /**
- * A pick handler covering the model-management menus and the wizard's protocol
- * and commit steps. `protocol` selects the protocol item; `limits` chooses
+ * A pick handler covering the `/model` picker and the add wizard's protocol and
+ * commit steps. `protocol` selects the protocol item; `limits` chooses
  * `Configure limits…` at the commit step instead of the primary action.
  */
 function wizard(
   opts: { protocol?: "openai" | "anthropic"; limits?: boolean } = {},
 ): (call: PickCall) => string | null {
   return call => {
+    if (call.title === "Model") return byLabel(call, "Add model…")
     if (call.title === "Protocol") {
       return byLabel(call, opts.protocol === "anthropic" ? "Anthropic" : "OpenAI-compatible")
     }
-    if (call.title.startsWith("Add ") || call.title.startsWith("Edit ")) {
+    if (call.title.startsWith("Add ")) {
       if (opts.limits) return byLabel(call, "Configure limits…")
-      return call.items.some(i => i.label === "Add model") ? byLabel(call, "Add model") : byLabel(call, "Save changes")
+      return byLabel(call, "Add model")
     }
     return null
   }
 }
 
-describe("/model add wizard", () => {
-  test("asks only for protocol, endpoint, model, and API key; defaults the limits", async () => {
+describe("/model selection", () => {
+  test("lists configured models, marks the active one, and offers only Add model…", async () => {
+    const h = modelHarness({ models: [{ id: "m1" }, { id: "m2" }], active: "m1" })
+    await findCommand("model")!.execute(h.ctx, "")
+    expect(h.lastPickItems.map(i => i.label)).toEqual(["m1", "m2", "Add model…"])
+    expect(h.lastPickItems[0]!.description).toBe("active")
+    expect(h.lastPickItems[1]!.description).toBeUndefined()
+    expect(h.lastPickItems.some(i => i.label === "Configure models…")).toBe(false)
+  })
+
+  test("selecting a configured model activates it", async () => {
     const h = modelHarness({
-      models: [],
-      askResults: ["", "gpt-5", "sk-new"],
-      pick: wizard(),
+      models: [{ id: "m1" }, { id: "m2" }],
+      active: "m1",
+      pick: call => (call.title === "Model" ? "m2" : null),
     })
-    await findCommand("model")!.execute(h.ctx, "add")
+    await findCommand("model")!.execute(h.ctx, "")
+    expect(h.calls.activated).toEqual(["m2"])
+    expect(h.notices.at(-1)).toEqual({ text: "active model: m2", isError: false })
+  })
+
+  test("Esc cancels without changing the active model", async () => {
+    const h = modelHarness({ models: [{ id: "m1" }, { id: "m2" }], active: "m1" })
+    await findCommand("model")!.execute(h.ctx, "")
+    expect(h.calls.activated).toEqual([])
+    expect(h.calls.configured).toEqual([])
+    expect(h.notices).toEqual([])
+  })
+
+  test("an activation failure is a normal error notice", async () => {
+    const h = modelHarness({ models: [{ id: "m1" }], active: "m1", pick: () => "ghost" })
+    await findCommand("model")!.execute(h.ctx, "")
+    expect(h.notices.at(-1)!.isError).toBe(true)
+    expect(h.notices.at(-1)!.text).toContain("cannot activate model")
+  })
+})
+
+describe("/model add", () => {
+  test("zero configured models: the picker collapses to Add model…", async () => {
+    const h = modelHarness({ models: [] })
+    await findCommand("model")!.execute(h.ctx, "")
+    expect(h.lastPickItems.map(i => i.label)).toEqual(["Add model…"])
+  })
+
+  test("with no models, choosing Add model… runs the wizard and configures", async () => {
+    const h = modelHarness({ models: [], askResults: ["", "gpt-5", "sk"], pick: wizard() })
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.calls.configured).toHaveLength(1)
     expect(h.calls.configured[0]).toMatchObject({
       id: "gpt-5",
@@ -325,55 +393,64 @@ describe("/model add wizard", () => {
       protocol: "openai",
       endpoint: "https://api.openai.com/v1",
       model: "gpt-5",
+      apiKey: "sk",
+      contextWindow: 128000,
+      maxOutputTokens: 8192,
+    })
+    expect(h.notices.at(-1)).toEqual({ text: 'model "gpt-5" configured and activated', isError: false })
+  })
+
+  test("asks only for protocol, endpoint, model, and API key; defaults the limits", async () => {
+    const h = modelHarness({ models: [], askResults: ["", "gpt-5", "sk-new"], pick: wizard() })
+    await findCommand("model")!.execute(h.ctx, "")
+    expect(h.asks.map(a => a.label).some(l => l.includes("context window"))).toBe(false)
+    expect(h.calls.configured[0]).toMatchObject({
+      protocol: "openai",
+      endpoint: "https://api.openai.com/v1",
+      model: "gpt-5",
       apiKey: "sk-new",
       contextWindow: 128000,
       maxOutputTokens: 8192,
     })
-    // No context-window/max-output prompt on the normal path.
-    expect(h.asks.map(a => a.label).some(l => l.includes("context window"))).toBe(false)
-    expect(h.notices.at(-1)).toEqual({ text: 'model "gpt-5" configured and activated', isError: false })
   })
 
   test("endpoint accepts the protocol default when left blank", async () => {
     const h = modelHarness({ askResults: ["", "gpt-5", "sk"], pick: wizard({ protocol: "anthropic" }) })
-    await findCommand("model")!.execute(h.ctx, "add")
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.calls.configured[0]!.endpoint).toBe("https://api.anthropic.com/v1")
     expect(h.calls.configured[0]!.protocol).toBe("anthropic")
   })
 
   test("a custom endpoint is used verbatim", async () => {
     const h = modelHarness({ askResults: ["https://my.gateway.example/v1", "gpt-5", "sk"], pick: wizard() })
-    await findCommand("model")!.execute(h.ctx, "add")
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.calls.configured[0]!.endpoint).toBe("https://my.gateway.example/v1")
   })
 
   test("the API key prompt is masked", async () => {
     const h = modelHarness({ askResults: ["", "gpt-5", "sk-secret"], pick: wizard() })
-    await findCommand("model")!.execute(h.ctx, "add")
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.asks.find(a => a.label === "api key:")?.secret).toBe(true)
   })
 
-  test("Advanced overrides both limits and they are persisted", async () => {
+  test("Configure limits… overrides both limits and they are persisted", async () => {
     const h = modelHarness({
       askResults: ["", "gpt-5", "sk", "200000", "16000"],
       pick: wizard({ limits: true }),
     })
-    await findCommand("model")!.execute(h.ctx, "add")
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.calls.configured[0]).toMatchObject({ contextWindow: 200000, maxOutputTokens: 16000 })
   })
 
-  test("accepting the Advanced defaults keeps the generated limits", async () => {
-    const h = modelHarness({
-      askResults: ["", "gpt-5", "sk", "", ""],
-      pick: wizard({ limits: true }),
-    })
-    await findCommand("model")!.execute(h.ctx, "add")
+  test("accepting the limits defaults keeps the generated limits", async () => {
+    const h = modelHarness({ askResults: ["", "gpt-5", "sk", "", ""], pick: wizard({ limits: true }) })
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.calls.configured[0]).toMatchObject({ contextWindow: 128000, maxOutputTokens: 8192 })
   })
 
   test("a required model identifier is enforced", async () => {
     const h = modelHarness({ askResults: ["", ""], pick: wizard() })
-    await findCommand("model")!.execute(h.ctx, "add")
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.calls.configured).toEqual([])
     expect(h.notices.at(-1)).toEqual({ text: "model identifier is required", isError: true })
   })
@@ -384,10 +461,9 @@ describe("/model add wizard", () => {
       askResults: ["", "gpt-5", "sk", "gpt-5-eu"],
       pick: wizard(),
     })
-    await findCommand("model")!.execute(h.ctx, "add")
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.calls.configured).toHaveLength(1)
     expect(h.calls.configured[0]!.id).toBe("gpt-5-eu")
-    // The collision prompt names the clash, and the existing model is untouched.
     expect(h.asks.some(a => a.label.includes('"gpt-5" already exists'))).toBe(true)
   })
 
@@ -397,7 +473,7 @@ describe("/model add wizard", () => {
       askResults: ["", "gpt-5", "sk", "gpt-5-eu", "gpt-5-eu-2"],
       pick: wizard(),
     })
-    await findCommand("model")!.execute(h.ctx, "add")
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.calls.configured[0]!.id).toBe("gpt-5-eu-2")
   })
 
@@ -407,7 +483,7 @@ describe("/model add wizard", () => {
       askResults: ["", "gpt-5", "sk", null],
       pick: wizard(),
     })
-    await findCommand("model")!.execute(h.ctx, "add")
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.calls.configured).toEqual([])
     expect(h.notices.at(-1)!.text).toBe("cancelled")
   })
@@ -418,211 +494,9 @@ describe("/model add wizard", () => {
       pick: wizard(),
       failConfigure: new Error('model id "gpt-5" is already configured'),
     })
-    await findCommand("model")!.execute(h.ctx, "add")
+    await findCommand("model")!.execute(h.ctx, "")
     expect(h.notices.at(-1)!.isError).toBe(true)
     expect(h.notices.at(-1)!.text).toContain("already configured")
-  })
-
-  test("/model with no models offers an actionable Add path", async () => {
-    const h = modelHarness({
-      models: [],
-      askResults: ["", "gpt-5", "sk"],
-      pick: call => {
-        if (call.title === "Model") return byLabel(call, "Add model…")
-        return wizard()(call)
-      },
-    })
-    await findCommand("model")!.execute(h.ctx, "")
-    expect(h.calls.configured).toHaveLength(1)
-  })
-})
-
-describe("/model edit wizard", () => {
-  test("preserves id, name, endpoint, key, and limits when nothing is changed", async () => {
-    const base = baseConfig({ id: "m1", name: "My Model", endpoint: "https://custom.example/v1" })
-    const h = modelHarness({
-      models: [{ id: "m1" }],
-      active: "m1",
-      configs: { m1: base },
-      askResults: ["", "", ""],
-      pick: wizard(),
-    })
-    await findCommand("model")!.execute(h.ctx, "edit m1")
-    expect(h.calls.updated).toHaveLength(1)
-    expect(h.calls.updated[0]).toEqual(base)
-    expect(h.notices.at(-1)!.text).toBe('model "m1" updated')
-  })
-
-  test("the protocol picker opens on the current protocol", async () => {
-    const base = baseConfig({ protocol: "anthropic" })
-    const h = modelHarness({
-      models: [{ id: "m1" }],
-      configs: { m1: base },
-      askResults: ["", "", ""],
-      pick: wizard({ protocol: "anthropic" }),
-    })
-    await findCommand("model")!.execute(h.ctx, "edit m1")
-    expect(h.picks.find(p => p.title === "Protocol")?.selectedValue).toBe("anthropic")
-  })
-
-  test("changing protocol falls back to the new protocol's default endpoint", async () => {
-    const base = baseConfig({ protocol: "openai", endpoint: "https://custom.example/v1" })
-    const h = modelHarness({
-      models: [{ id: "m1" }],
-      configs: { m1: base },
-      askResults: ["", "", ""], // accept the shown endpoint default
-      pick: wizard({ protocol: "anthropic" }),
-    })
-    await findCommand("model")!.execute(h.ctx, "edit m1")
-    expect(h.calls.updated[0]).toMatchObject({
-      protocol: "anthropic",
-      endpoint: "https://api.anthropic.com/v1",
-      id: "m1",
-      name: "m1",
-    })
-  })
-
-  test("overriding limits persists them while keeping identity and key", async () => {
-    const base = baseConfig({ id: "m1", name: "Keep", apiKey: "sk-keep" })
-    const h = modelHarness({
-      models: [{ id: "m1" }],
-      configs: { m1: base },
-      askResults: ["", "", "", "200000", "16000"],
-      pick: wizard({ limits: true }),
-    })
-    await findCommand("model")!.execute(h.ctx, "edit m1")
-    expect(h.calls.updated[0]).toMatchObject({
-      id: "m1",
-      name: "Keep",
-      apiKey: "sk-keep",
-      contextWindow: 200000,
-      maxOutputTokens: 16000,
-    })
-  })
-
-  test("a blank API key preserves the existing credential", async () => {
-    const base = baseConfig({ apiKey: "sk-existing" })
-    const h = modelHarness({
-      models: [{ id: "m1" }],
-      configs: { m1: base },
-      askResults: ["", "", ""],
-      pick: wizard(),
-    })
-    await findCommand("model")!.execute(h.ctx, "edit m1")
-    expect(h.calls.updated[0]!.apiKey).toBe("sk-existing")
-  })
-
-  test("a persistence failure on update is an error notice", async () => {
-    const h = modelHarness({
-      models: [{ id: "m1" }],
-      configs: { m1: baseConfig() },
-      askResults: ["", "", ""],
-      pick: wizard(),
-      failUpdate: new Error("cannot persist model configuration to /x: EACCES"),
-    })
-    await findCommand("model")!.execute(h.ctx, "edit m1")
-    expect(h.notices.at(-1)!.isError).toBe(true)
-    expect(h.notices.at(-1)!.text).toContain("cannot persist")
-  })
-})
-
-describe("/model selection and removal", () => {
-  test("models exist: the picker lists them and a Configure models… action", async () => {
-    const h = modelHarness({ models: [{ id: "m1" }, { id: "m2" }], active: "m1" })
-    await findCommand("model")!.execute(h.ctx, "")
-    expect(h.lastPickItems.map(i => i.label)).toEqual(["m1", "m2", "Configure models…"])
-    expect(h.lastPickItems[0]!.description).toBe("active")
-    expect(h.lastPickItems[1]!.description).toBeUndefined()
-  })
-
-  test("selecting a model activates it", async () => {
-    const h = modelHarness({ models: [{ id: "m1" }, { id: "m2" }], active: "m1", pick: () => "m2" })
-    await findCommand("model")!.execute(h.ctx, "")
-    expect(h.calls.activated).toEqual(["m2"])
-    expect(h.notices.at(-1)!.text).toBe("active model: m2")
-  })
-
-  test("direct selection by id activates it", async () => {
-    const h = modelHarness({ models: [{ id: "m1" }, { id: "m2" }], active: "m1" })
-    await findCommand("model")!.execute(h.ctx, "m2")
-    expect(h.calls.activated).toEqual(["m2"])
-  })
-
-  test("Configure models… → Remove model… confirms, then removes a non-active model", async () => {
-    const h = modelHarness({
-      models: [{ id: "m1" }, { id: "m2" }],
-      active: "m1",
-      pick: call => {
-        if (call.title === "Model") return byLabel(call, "Configure models…")
-        if (call.title === "Configure models") return byLabel(call, "Remove model…")
-        if (call.title === "Remove model" && call.items.some(i => i.value === "remove")) return "remove"
-        if (call.title === "Remove model") return "m2"
-        return null
-      },
-    })
-    await findCommand("model")!.execute(h.ctx, "")
-    expect(h.calls.removed).toEqual(["m2"])
-    expect(h.calls.activated).toEqual([])
-    expect(h.notices.at(-1)!.text).toBe('removed model "m2"')
-  })
-
-  test("removing a model requires an explicit confirmation", async () => {
-    const h = modelHarness({
-      models: [{ id: "m1" }, { id: "m2" }],
-      active: "m1",
-      pick: call => {
-        if (call.title === "Remove model" && call.items.some(i => i.value === "cancel")) return "cancel"
-        return null
-      },
-    })
-    await findCommand("model")!.execute(h.ctx, "remove m2")
-    expect(h.calls.removed).toEqual([])
-    expect(h.notices.at(-1)!.text).toBe("cancelled")
-  })
-
-  test("removing the active model with others requires an explicit replacement", async () => {
-    const h = modelHarness({
-      models: [{ id: "m1" }, { id: "m2" }],
-      active: "m1",
-      pick: call => {
-        if (call.title === "Remove model" && call.items.some(i => i.value === "remove")) return "remove"
-        if (call.title === "Activate model") return "m2"
-        return null
-      },
-    })
-    await findCommand("model")!.execute(h.ctx, "remove m1")
-    expect(h.calls.removed).toEqual(["m1"])
-    expect(h.calls.activated).toEqual(["m2"])
-    expect(h.notices.at(-1)!.text).toBe('removed model "m1" — active model: m2')
-  })
-
-  test("cancelling the replacement decision abandons the removal", async () => {
-    const h = modelHarness({
-      models: [{ id: "m1" }, { id: "m2" }],
-      active: "m1",
-      pick: call => {
-        if (call.title === "Remove model" && call.items.some(i => i.value === "remove")) return "remove"
-        return null
-      },
-    })
-    await findCommand("model")!.execute(h.ctx, "remove m1")
-    expect(h.calls.removed).toEqual([])
-    expect(h.notices.at(-1)!.text).toBe("cancelled")
-  })
-
-  test("removing the last model leaves no active model (valid)", async () => {
-    const h = modelHarness({
-      models: [{ id: "m1" }],
-      active: "m1",
-      pick: call => {
-        if (call.title === "Remove model" && call.items.some(i => i.value === "remove")) return "remove"
-        return null
-      },
-    })
-    await findCommand("model")!.execute(h.ctx, "remove m1")
-    expect(h.calls.removed).toEqual(["m1"])
-    expect(h.calls.activated).toEqual([])
-    expect(h.notices.at(-1)!.text).toBe('removed model "m1"')
   })
 })
 
@@ -638,15 +512,136 @@ describe("wizard cancellation", () => {
       const h = modelHarness({
         askResults: [...asks],
         pick: call => {
-          if (call.title === "Protocol") return cancelAt === "protocol" ? null : byLabel(call, "OpenAI-compatible")
-          if (call.title.startsWith("Add ")) return cancelAt === "commit" ? null : byLabel(call, "Add model")
+          if (call.title === "Model") return byLabel(call, "Add model…")
+          if (call.title === "Protocol") {
+            return cancelAt === "protocol" ? null : byLabel(call, "OpenAI-compatible")
+          }
+          if (call.title.startsWith("Add ")) {
+            return cancelAt === "commit" ? null : byLabel(call, "Add model")
+          }
           return null
         },
       })
-      await findCommand("model")!.execute(h.ctx, "add")
+      await findCommand("model")!.execute(h.ctx, "")
       expect(h.calls.configured).toEqual([])
       expect(h.notices.at(-1)).toEqual({ text: "cancelled", isError: false })
     })
   }
 })
 
+// ── real persistence through the runtime bridge ──────────────────────
+
+/**
+ * Runs a scripted `/model` against a real MiniCode agent (real ModelManager,
+ * a real `models.json` under a temp `MINICODE_CONFIG_DIR`), so selection and
+ * addition are proven to persist through the actual runtime bridge rather than
+ * a fake.
+ */
+async function withRealModelConfig(
+  seed: (dir: string) => void,
+  io: { pick?: (call: PickCall, index: number) => string | null; asks?: Array<string | null> },
+  run: (ctx: CommandContext, notices: Array<{ text: string; isError: boolean }>, dir: string) => Promise<void>,
+): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), "minicode-cli-model-"))
+  const previous = process.env.MINICODE_CONFIG_DIR
+  process.env.MINICODE_CONFIG_DIR = dir
+  try {
+    seed(dir)
+    const notices: Array<{ text: string; isError: boolean }> = []
+    const asks = [...(io.asks ?? [])]
+    let pickCall = 0
+    const agent = new MiniCode()
+    const ctx = {
+      agent: () => agent,
+      notify: (text: string, isError?: boolean) => { notices.push({ text, isError: isError === true }) },
+      pick: async (title: string, items: Array<{ value: string; label: string; description?: string }>) => {
+        const call: PickCall = { title, items }
+        const result = io.pick?.(call, pickCall) ?? null
+        pickCall += 1
+        return result
+      },
+      ask: async () => (asks.length > 0 ? asks.shift()! : null),
+    } as unknown as CommandContext
+    await run(ctx, notices, dir)
+  } finally {
+    if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
+    else process.env.MINICODE_CONFIG_DIR = previous
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+function persistedModels(dir: string): {
+  models: Array<{ id: string; name: string; model: string; apiKey: string }>
+  activeModelId: string | null
+} {
+  return JSON.parse(readFileSync(join(dir, "models.json"), "utf-8"))
+}
+
+describe("/model persists through the real runtime bridge", () => {
+  test("selecting a model persists the active model", async () => {
+    await withRealModelConfig(
+      dir => writeFileSync(join(dir, "models.json"), JSON.stringify({
+        version: 1,
+        models: [
+          { id: "m1", name: "m1", protocol: "openai", endpoint: "https://api.example.com/v1", model: "m1", apiKey: "k1", contextWindow: 128000, maxOutputTokens: 8192 },
+          { id: "m2", name: "m2", protocol: "openai", endpoint: "https://api.example.com/v1", model: "m2", apiKey: "k2", contextWindow: 128000, maxOutputTokens: 8192 },
+        ],
+        activeModelId: "m1",
+      })),
+      { pick: call => (call.title === "Model" ? "m2" : null) },
+      async (ctx, notices, dir) => {
+        await findCommand("model")!.execute(ctx, "")
+        expect(notices.at(-1)).toEqual({ text: "active model: m2", isError: false })
+        expect(persistedModels(dir).activeModelId).toBe("m2")
+      },
+    )
+  })
+
+  test("adding a model persists it and makes it active", async () => {
+    await withRealModelConfig(
+      () => {},
+      {
+        pick: call => {
+          if (call.title === "Model") return byLabel(call, "Add model…")
+          if (call.title === "Protocol") return byLabel(call, "OpenAI-compatible")
+          if (call.title.startsWith("Add ")) return byLabel(call, "Add model")
+          return null
+        },
+        asks: ["", "gpt-5", "sk-new"],
+      },
+      async (ctx, notices, dir) => {
+        await findCommand("model")!.execute(ctx, "")
+        expect(notices.at(-1)).toEqual({ text: 'model "gpt-5" configured and activated', isError: false })
+        const persisted = persistedModels(dir)
+        expect(persisted.models.map(m => m.id)).toEqual(["gpt-5"])
+        expect(persisted.activeModelId).toBe("gpt-5")
+        expect(persisted.models[0]!.apiKey).toBe("sk-new")
+      },
+    )
+  })
+
+  test("adding a second model keeps both and activates the new one", async () => {
+    await withRealModelConfig(
+      dir => writeFileSync(join(dir, "models.json"), JSON.stringify({
+        version: 1,
+        models: [{ id: "existing", name: "existing", protocol: "openai", endpoint: "https://api.example.com/v1", model: "existing", apiKey: "k", contextWindow: 128000, maxOutputTokens: 8192 }],
+        activeModelId: "existing",
+      })),
+      {
+        pick: call => {
+          if (call.title === "Model") return byLabel(call, "Add model…")
+          if (call.title === "Protocol") return byLabel(call, "Anthropic")
+          if (call.title.startsWith("Add ")) return byLabel(call, "Add model")
+          return null
+        },
+        asks: ["", "claude-sonnet-4-5", "sk-ant"],
+      },
+      async (ctx, _notices, dir) => {
+        await findCommand("model")!.execute(ctx, "")
+        const persisted = persistedModels(dir)
+        expect(persisted.models.map(m => m.id)).toEqual(["existing", "claude-sonnet-4-5"])
+        expect(persisted.activeModelId).toBe("claude-sonnet-4-5")
+      },
+    )
+  })
+})

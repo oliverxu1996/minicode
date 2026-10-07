@@ -104,15 +104,17 @@ MiniCode speaks two protocols, so it works with the official APIs and with any c
 | `anthropic` | Anthropic API and Anthropic-protocol endpoints |
 | `openai` | OpenAI API and OpenAI-protocol compatible endpoints |
 
-Model-related commands:
+Model commands:
 
 | Command | Purpose |
 | --- | --- |
-| `/model` | Select the active model, or open `Configure models…` to add, edit, or remove one |
-| `/model add` | Configure a new model (protocol, endpoint, model, API key; limits optional) |
-| `/model edit <id>` | Edit a configured model |
-| `/model remove <id>` | Remove a configured model |
+| `/model` | Select an existing model, or choose `Add model…` to configure a new one |
 | Ctrl+P | Cycle through configured models |
+
+`/model` is the single interactive model surface. Adding a model asks for the
+protocol, endpoint, provider model, and API key, with sensible defaults for the
+context and output limits (changeable through an optional `Configure limits…`
+step).
 
 Configuration is persisted locally under your config directory
 (`~/.minicode/models.json`) — you can also edit that file directly.
@@ -143,7 +145,7 @@ If MiniCode is interrupted mid-task, the next start reconciles the interrupted w
 | `/import <path>` | Import a session from a JSONL file |
 | `/session` | Manage sessions in this workspace (open, search, rename, delete, fork, clone, related) |
 | `/new` | Start a fresh session in the same workspace |
-| `/model` | Model selection and configuration |
+| `/model` | Select or add a model |
 | `/trust` · `/reload` | Project resources |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/quit` | Exit |
