@@ -24,6 +24,7 @@ import {
 	type RunDisplay,
 } from "../projection"
 import { FooterLineView } from "./view/footer"
+import { KEYBOARD_HINTS, helloHeader, transcriptHeight } from "./view/banner"
 import { buildTuiLayout } from "./view/layout"
 import { runCompaction } from "./compaction"
 import { Selector, PickerSlot, pickerVisibleItems, type SelectorItem } from "./view/selector"
@@ -165,12 +166,15 @@ export class MiniCodeTui {
 		this.tui = new TuiAltScreen(new ProcessTerminal(), false, undefined, { mouse: true })
 		this.session = options.session
 
-		const hints = ansi.gray(
-			"enter submit · alt+enter newline · esc interrupt · ctrl+c clear (twice exits) · ctrl+d exit · ctrl+o tools · ctrl+p model · pageup/pagedown scroll · /help commands",
-		)
-		const header = new Container()
-		header.addChild(new Text(`${ansi.bold(ansi.cyan("MiniCode"))} ${ansi.gray(options.label ?? this.session.cwd)}`, 1, 0))
-		header.addChild(new Text(`  ${hints}`, 0, 0))
+		// The header is the transcript's empty state: the hello banner while the
+		// transcript is empty, scrolling away as output grows, and naturally back
+		// after `/new` clears it. The bottom chrome is untouched and the banner
+		// never blocks the composer.
+		const header = helloHeader({
+			label: options.label ?? this.session.cwd,
+			hints: KEYBOARD_HINTS,
+			availableHeight: () => transcriptHeight(this.tui.terminal.rows),
+		})
 
 		this.editor = this.createEditor()
 		// The picker is a fixed VStack entry directly above the composer; it

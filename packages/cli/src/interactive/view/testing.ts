@@ -44,6 +44,8 @@ export interface TuiHarnessOptions {
 	chatLines?: number
 	/** Number of header lines (0 to omit the header). */
 	headerRows?: number
+	/** Replaces the synthetic header with a real component (banner integration tests). */
+	headerComponent?: Component
 	/** Number of status lines (2 simulates the spinner). */
 	statusRows?: number
 	editorText?: string
@@ -167,7 +169,7 @@ export class TuiHarness {
 
 		this.picker = new PickerSlot(() => pickerVisibleItems(this.rowsValue))
 		const layout = buildTuiLayout({
-			header: this.header,
+			header: options.headerComponent ?? this.header,
 			chat: this.chat,
 			status,
 			picker: this.picker,
