@@ -144,7 +144,6 @@ If MiniCode is interrupted mid-task, the next start reconciles the interrupted w
 | `/session` | Manage sessions in this workspace (open, search, rename, delete, fork, clone, related) |
 | `/new` | Start a fresh session in the same workspace |
 | `/model` | Select or add a model |
-| `/reload` | Project resources |
 | `/quit` | Exit |
 
 ## Project instructions

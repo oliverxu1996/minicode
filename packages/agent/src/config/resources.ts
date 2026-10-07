@@ -37,6 +37,31 @@ export function projectResourceDir(cwd: string): string {
   return join(cwd, ".minicode")
 }
 
+/** A prompt template's identity without its content. */
+export interface PromptTemplateSummary {
+  readonly name: string
+  readonly source: "user" | "project"
+}
+
+/**
+ * Lists prompt templates by name only, from the user then project directories.
+ * Reads directory entries, never file contents, so callers can discover
+ * templates cheaply (autocomplete, invocation). Order matches `loadResources`.
+ */
+export function listPromptTemplates(cwd: string): PromptTemplateSummary[] {
+  const out: PromptTemplateSummary[] = []
+  const collect = (dir: string, source: "user" | "project"): void => {
+    if (!existsSync(dir)) return
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue
+      out.push({ name: entry.name.replace(/\.md$/, ""), source })
+    }
+  }
+  collect(join(userResourceDir(), "prompts"), "user")
+  collect(join(projectResourceDir(cwd), "prompts"), "project")
+  return out
+}
+
 function readMdFiles(dir: string): Array<{ name: string; content: string }> {
   if (!existsSync(dir)) return []
   const out: Array<{ name: string; content: string }> = []

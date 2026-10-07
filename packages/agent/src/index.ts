@@ -29,6 +29,12 @@ export type {
 export { Compactor, type CompactionOutcome } from "./context/compaction"
 export { configDir, migrateLegacyConfig } from "./config/dir"
 export { loadSettings } from "./config/settings"
-export { loadResources, type PromptTemplate, type Skill } from "./config/resources"
+export {
+  loadResources,
+  listPromptTemplates,
+  type PromptTemplate,
+  type PromptTemplateSummary,
+  type Skill,
+} from "./config/resources"
 export { IGNORED_WORKSPACE_ENTRIES } from "./workspace-ignored"
 export { CODING_TOOLS, type Tool, type ToolExecutionContext, type ToolResult } from "./tools"

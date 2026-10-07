@@ -6,6 +6,11 @@ All notable changes to MiniCode will be documented in this file.
 
 ### Changed
 
+- Prompt templates are now discovered live. The editor's `/` autocomplete and
+  template invocation read `.minicode/prompts/*.md` (and `~/.minicode/prompts/`)
+  from disk as needed, so a template added, edited, or removed while MiniCode
+  is running takes effect immediately with no manual refresh. Prompt contents
+  were already resolved from disk at invocation time.
 - Project-local prompts (`.minicode/prompts/*.md`) and skills
   (`.minicode/skills/<name>/SKILL.md`) now load unconditionally. The
   per-project trust decision was removed, so no consent step is required
@@ -27,6 +32,9 @@ All notable changes to MiniCode will be documented in this file.
 
 ### Removed
 
+- Slash command `/reload`. Prompt templates are discovered live, `AGENTS.md` /
+  `CLAUDE.md` and agent-facing resources load on every run, so there is nothing
+  left to refresh manually.
 - Slash command `/trust` and the project-trust mechanism behind it
   (`isProjectTrusted`, `trustProject`, and the `projectTrusted` settings
   key). Existing `.minicode/settings.json` files that still contain

@@ -12,8 +12,8 @@ import {
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import type { ModelLimits } from "@minicode/model"
-import type { MiniCode, RunEvent, Session, SessionMessage, Skill } from "@minicode/agent"
-import { configDir, loadResources, loadSettings } from "@minicode/agent"
+import type { MiniCode, RunEvent, Session, SessionMessage } from "@minicode/agent"
+import { configDir, listPromptTemplates, loadSettings } from "@minicode/agent"
 import { ansi, markdownTheme } from "./view/theme"
 import {
 	NO_RUN_DISPLAY,
@@ -34,7 +34,7 @@ import { MiniCodeAutocomplete } from "./input/autocomplete"
 import { argumentPlaceholderFor } from "./input/argument-placeholder"
 import { altEnterAsNewline } from "./input/alt-enter"
 import { expandFileReferences } from "./input/expand"
-import { COMMANDS, findCommand, type CommandContext, type CompactResult } from "./commands"
+import { COMMANDS, findCommand, type Command, type CommandContext, type CompactResult } from "./commands"
 import {
 	ToolExecutionComponent,
 	assistantMessage,
@@ -44,13 +44,62 @@ import {
 	userMessage,
 } from "./view/components"
 
-
-
 export interface MiniCodeTuiOptions {
 	agent: MiniCode
 	session: Session
 	/** Window title / header label (typically the workspace path). */
 	label?: string
+}
+
+/**
+ * How a slash input resolves after the leading `/`. Registered commands take
+ * precedence over prompt templates of the same name.
+ */
+export type SlashInput =
+	| { kind: "command"; command: Command }
+	| { kind: "template"; content: string }
+	| { kind: "unknown" }
+
+/**
+ * Reads a prompt template's content from disk. Project templates take
+ * precedence over user templates, matching the historical behavior. Content is
+ * always read fresh, so edits apply on the next invocation.
+ */
+function readPromptTemplate(cwd: string, name: string): string | null {
+	const userDir = join(configDir(), "prompts")
+	for (const dir of [join(cwd, ".minicode", "prompts"), userDir]) {
+		try {
+			return readFileSync(join(dir, `${name}.md`), "utf-8")
+		} catch {
+			// Try the next location.
+		}
+	}
+	return null
+}
+
+/**
+ * Resolves a slash input to the command or prompt template it names. Templates
+ * are discovered live from disk, so a newly added one works without any
+ * refresh command; a removed one stops resolving.
+ */
+export function resolveSlashInput(cwd: string, name: string): SlashInput {
+	const command = findCommand(name)
+	if (command !== undefined) return { kind: "command", command }
+	const content = readPromptTemplate(cwd, name)
+	if (content !== null) return { kind: "template", content }
+	return { kind: "unknown" }
+}
+
+/**
+ * The editor's autocomplete source: registered commands plus prompt templates
+ * discovered live from disk, so added/removed templates appear (and disappear)
+ * without a manual refresh.
+ */
+export function autocompleteItems(cwd: string): Array<{ name: string; description: string }> {
+	return [
+		...COMMANDS.map(c => ({ name: c.name, description: c.description })),
+		...listPromptTemplates(cwd).map(t => ({ name: t.name, description: `template · ${t.source}` })),
+	]
 }
 
 interface AskState {
@@ -107,7 +156,6 @@ export class MiniCodeTui {
 	/** The open `/session` manager, which owns input while present. */
 	private manager: SessionManager | null = null
 	private askState: AskState | null = null
-	private promptTemplates: Array<{ name: string; description: string }> = []
 	private reasoning: Container | null = null
 	private readonly commandContext: CommandContext
 
@@ -145,7 +193,6 @@ export class MiniCodeTui {
 		this.tui.addInputListener(data => this.handleGlobalInput(data))
 
 		this.commandContext = this.buildCommandContext()
-		this.refreshTemplates()
 		this.replaySession()
 		void this.refreshFooterData()
 		this.updateFooter()
@@ -258,36 +305,22 @@ export class MiniCodeTui {
 			submitTask: async text => {
 				await this.submit(text)
 			},
-			skills: (): Skill[] => this.currentSkills,
-			reloadResources: (): void => this.refreshTemplates(),
 			quit: (): void => this.shutdown(),
 		}
-	}
-
-	private currentSkills: Skill[] = []
-
-	private refreshTemplates(): void {
-		const resources = loadResources(this.session.cwd)
-		this.promptTemplates = resources.prompts.map(prompt => ({
-			name: prompt.name,
-			description: `template · ${prompt.source}`,
-		}))
-		this.currentSkills = resources.skills
 	}
 
 	// ── editor ───────────────────────────────────────────────────────
 
 	/**
 	 * Replaces the active session and replays it. Owns every UI refresh a
-	 * switch requires: transcript, pending tool state, templates/context, and
-	 * the footer's workspace/model/branch.
+	 * switch requires: transcript, pending tool state, and the footer's
+	 * workspace/model/branch.
 	 */
 	private setActiveSession(session: Session): void {
 		this.session = session
 		this.chat.clear()
 		this.pendingTools.clear()
 		this.replaySession()
-		this.refreshTemplates()
 		// A switched/forked session may live in another workspace, so the
 		// footer's branch (and model) are re-read, not carried over.
 		void this.refreshFooterData()
@@ -310,10 +343,7 @@ export class MiniCodeTui {
 			{ ghostTextStyle: (text) => ansi.gray(text) },
 		)
 		editor.setAutocompleteProvider(new MiniCodeAutocomplete(
-			() => [
-				...COMMANDS.map(c => ({ name: c.name, description: c.description })),
-				...this.promptTemplates.map(t => ({ name: t.name, description: t.description })),
-			],
+			() => autocompleteItems(this.session.cwd),
 			() => this.session.cwd,
 		))
 		editor.setGhostTextProvider(state => argumentPlaceholderFor(state, COMMANDS))
@@ -430,10 +460,10 @@ export class MiniCodeTui {
 			const name = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx)
 			const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1)
 
-			const command = findCommand(name)
-			if (command !== undefined) {
+			const input = resolveSlashInput(this.session.cwd, name)
+			if (input.kind === "command") {
 				try {
-					await command.execute(this.commandContext, args)
+					await input.command.execute(this.commandContext, args)
 				} catch (error) {
 					// Model-management failures must surface as normal error
 					// notices, never as an uncaught stack trace over the TUI.
@@ -447,13 +477,11 @@ export class MiniCodeTui {
 				this.tui.requestRender()
 				return
 			}
-			// Prompt templates: /name expands to the template content.
-			const template = this.promptTemplates.find(t => t.name === name)
-			if (template !== undefined) {
-				const content = this.readTemplate(name)
-				if (content !== null) {
-					await this.submit(content)
-				}
+			// Prompt templates: /name expands to the template content, resolved
+			// live from disk so added, edited, and removed templates apply
+			// immediately.
+			if (input.kind === "template") {
+				await this.submit(input.content)
 				return
 			}
 			this.chat.addChild(errorNotice(`unknown command "/${name}" — try /help`))
@@ -479,18 +507,6 @@ export class MiniCodeTui {
 
 		this.chat.addChild(userMessage(text))
 		await this.startRun(expandFileReferences(text, this.session.cwd))
-	}
-
-	private readTemplate(name: string): string | null {
-		const userDir = join(configDir(), "prompts")
-		for (const dir of [join(this.session.cwd, ".minicode", "prompts"), userDir]) {
-			try {
-				return readFileSync(join(dir, `${name}.md`), "utf-8")
-			} catch {
-				// Try the next location.
-			}
-		}
-		return null
 	}
 
 	private async startRun(text: string): Promise<void> {

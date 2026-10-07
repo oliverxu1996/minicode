@@ -1,32 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionMessage } from "@minicode/agent"
 import { ToolExecutionComponent, replayMessage, toolArgumentSummary } from "./components"
-import { findCommand, type CommandContext } from "../commands"
 
 function render(component: { render(width: number): string[] }): string {
 	return component.render(100).join("\n")
 }
-
-describe("reload command", () => {
-	test("/reload refreshes the UI's cached resources, so its confirmation is true", async () => {
-		const reload = findCommand("reload")
-		expect(reload).toBeDefined()
-
-		let reloaded = 0
-		const notices: string[] = []
-		const ctx = {
-			reloadResources: (): void => { reloaded += 1 },
-			notify: (text: string): void => { notices.push(text) },
-		} as unknown as CommandContext
-
-		await reload!.execute(ctx, "")
-
-		// The command must actually perform the refresh it reports. It used to
-		// call an empty no-op and print the confirmation regardless.
-		expect(reloaded).toBe(1)
-		expect(notices).toHaveLength(1)
-	})
-})
 
 describe("TUI component mapping (V2)", () => {
 	test("tool component renders a running line, then success with a collapsed result", () => {

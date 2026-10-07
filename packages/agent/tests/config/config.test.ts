@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { configDir, copyLegacyConfigIfNeeded } from "../../src/config/dir"
 import { loadSettings, projectSettingsPath, globalSettingsPath } from "../../src/config/settings"
 import { formatProjectInstructions, loadProjectContext } from "../../src/config/context"
-import { loadResources } from "../../src/config/resources"
+import { loadResources, listPromptTemplates } from "../../src/config/resources"
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "minicode-product-test-"))
@@ -132,6 +132,57 @@ describe("resources (AC13/AC17)", () => {
       if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
       else process.env.MINICODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("listPromptTemplates lists names and sources without reading contents, live", () => {
+    const dir = tempDir()
+    const userDir = tempDir()
+    const previous = process.env.MINICODE_CONFIG_DIR
+    process.env.MINICODE_CONFIG_DIR = userDir
+    try {
+      const projectPrompts = join(dir, ".minicode", "prompts")
+      mkdirSync(projectPrompts, { recursive: true })
+      writeFileSync(join(projectPrompts, "review.md"), "Review the diff.")
+      const userPrompts = join(userDir, "prompts")
+      mkdirSync(userPrompts, { recursive: true })
+      writeFileSync(join(userPrompts, "daily.md"), "Daily.")
+
+      // User templates first, then project — the order loadResources uses.
+      expect(listPromptTemplates(dir)).toEqual([
+        { name: "daily", source: "user" },
+        { name: "review", source: "project" },
+      ])
+
+      // Additions are discovered immediately; removals drop out.
+      writeFileSync(join(projectPrompts, "fresh.md"), "Fresh.")
+      expect(listPromptTemplates(dir)).toContainEqual({ name: "fresh", source: "project" })
+      rmSync(join(projectPrompts, "review.md"))
+      expect(listPromptTemplates(dir).map(t => t.name)).not.toContain("review")
+    } finally {
+      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
+      else process.env.MINICODE_CONFIG_DIR = previous
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(userDir, { recursive: true, force: true })
+    }
+  })
+
+  test("listPromptTemplates ignores non-markdown entries and directories", () => {
+    const dir = tempDir()
+    const userDir = tempDir()
+    const previous = process.env.MINICODE_CONFIG_DIR
+    process.env.MINICODE_CONFIG_DIR = userDir
+    try {
+      const projectPrompts = join(dir, ".minicode", "prompts")
+      mkdirSync(join(projectPrompts, "not-a-template.md"), { recursive: true })
+      writeFileSync(join(projectPrompts, "notes.txt"), "not markdown")
+      writeFileSync(join(projectPrompts, "real.md"), "real")
+      expect(listPromptTemplates(dir)).toEqual([{ name: "real", source: "project" }])
+    } finally {
+      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
+      else process.env.MINICODE_CONFIG_DIR = previous
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(userDir, { recursive: true, force: true })
     }
   })
 })
