@@ -45,7 +45,7 @@ export interface TuiHarnessOptions {
 	/** Number of header lines (0 to omit the header). */
 	headerRows?: number
 	/** Replaces the synthetic header with a real component (banner integration tests). */
-	headerComponent?: Component
+	headerComponent?: Component | ((terminal: Terminal) => Component)
 	/** Number of status lines (2 simulates the spinner). */
 	statusRows?: number
 	editorText?: string
@@ -102,6 +102,9 @@ export class TuiHarness {
 	readonly header: GrowableLines
 	readonly chat: GrowableLines
 	readonly picker: PickerSlot
+	readonly status: Component
+	readonly footerRow1: Component
+	readonly footerRow2: Component
 	readonly submitted: string[] = []
 
 	private columnsValue: number
@@ -147,7 +150,7 @@ export class TuiHarness {
 
 		this.header = new GrowableLines(options.headerRows ?? 2, "header")
 		this.chat = new GrowableLines(options.chatLines ?? 0, "chat")
-		const status =
+		this.status =
 			options.statusRows && options.statusRows > 0
 				? new FixedLines(Array.from({ length: options.statusRows }, (_, i) => `STATUS-${i}`))
 				: new FixedLines([])
@@ -168,14 +171,18 @@ export class TuiHarness {
 		if (options.editorText !== undefined) this.editor.setText(options.editorText)
 
 		this.picker = new PickerSlot(() => pickerVisibleItems(this.rowsValue))
+		this.footerRow1 = new FixedLines(["FOOTER-1"])
+		this.footerRow2 = new FixedLines(["FOOTER-2"])
+		const requestedHeader = options.headerComponent
+		const header = typeof requestedHeader === "function" ? requestedHeader(this.terminal) : requestedHeader ?? this.header
 		const layout = buildTuiLayout({
-			header: options.headerComponent ?? this.header,
+			header,
 			chat: this.chat,
-			status,
+			status: this.status,
 			picker: this.picker,
 			editor: this.editor,
-			footerRow1: new FixedLines(["FOOTER-1"]),
-			footerRow2: new FixedLines(["FOOTER-2"]),
+			footerRow1: this.footerRow1,
+			footerRow2: this.footerRow2,
 		})
 		this.scroll = layout.scroll
 		this.tui.setLayoutRoot(layout.root)

@@ -10,6 +10,12 @@ import { ansi } from "./theme"
  * and returns when `/new` clears the transcript. It is not a splash screen, it
  * never blocks input, and it owns no lifecycle state.
  *
+ * It is a *centered hero*, not a top-anchored header: the whole rendered group
+ * (wordmark, descriptor, label and keyboard hints) is centered vertically
+ * within the transcript viewport and horizontally by centering each hero line.
+ * The transcript viewport height excludes the fixed bottom chrome, so the hero
+ * is never centered against, nor allowed to overlap, the composer/footer.
+ *
  * The wordmark is rendered from fixed, measured strings rather than handed to
  * `Text`, so terminal word-wrapping can never split a glyph: every line is
  * centered and padded to exactly the available width. The 5-row and 3-row
@@ -54,7 +60,12 @@ const FIXED_CHROME_ROWS = 5
 /** The banner treatments, largest first. */
 export type BannerTier = "large" | "medium" | "single"
 
-/** Transcript rows available to the header: terminal rows minus the fixed bottom chrome. */
+/**
+ * Transcript rows available at idle: terminal rows minus the fixed bottom
+ * chrome (composer + two footer rows). The interactive app measures the real
+ * chrome live (a multiline composer or open picker shrinks the viewport); this
+ * constant-chrome form is the idle-height budget the tier tests assert against.
+ */
 export function transcriptHeight(terminalRows: number): number {
 	return Math.max(0, Math.floor(terminalRows) - FIXED_CHROME_ROWS)
 }
@@ -163,7 +174,7 @@ export function selectBannerTier(input: BannerTierInput): BannerTier {
 
 export interface HelloHeaderInput {
 	readonly width: number
-	/** Transcript rows available at idle (see {@link transcriptHeight}). */
+	/** Transcript viewport rows: terminal height minus the fixed bottom chrome. */
 	readonly availableHeight: number
 	/** Workspace path, or a resumed session id — whatever the old title line showed. */
 	readonly label: string
@@ -172,9 +183,27 @@ export interface HelloHeaderInput {
 }
 
 /**
- * Renders the complete empty-state header: wordmark, descriptor, label, hints.
- * Every returned line is exactly the available width, so no downstream text
- * wrapping can split the wordmark.
+ * Centers a rendered hero group vertically within a transcript viewport by
+ * prepending blank lines. Horizontal centering is already built into every
+ * group line. A group taller than the viewport is top-anchored (never pushed
+ * out of the top); an odd row of slack falls below the group.
+ */
+function centerVertically(group: string[], height: number, width: number): string[] {
+	const top = Math.max(0, Math.floor((height - group.length) / 2))
+	if (top === 0) return group
+	return [...Array.from({ length: top }, () => blankLine(width)), ...group]
+}
+
+/**
+ * Renders the complete empty-state hero: wordmark, descriptor, label, hints,
+ * centered as one group inside the transcript viewport.
+ *
+ * The richest composition that fits the viewport is chosen first; each fallback
+ * drops one layer (spacing, descriptor, then label) while keeping the wordmark
+ * and hints together, and only drops the hints when they cannot fit alongside
+ * the wordmark at all. Fitting the group is what lets it be centered rather
+ * than clipped off-screen. Every returned line is exactly the available width,
+ * so no downstream text wrapping can split the wordmark.
  */
 export function renderHelloHeader(input: HelloHeaderInput): string[] {
 	const width = Math.max(1, Math.floor(input.width))
@@ -200,7 +229,8 @@ export function renderHelloHeader(input: HelloHeaderInput): string[] {
 	const styledLabel = labelLines.map(line => leftLine(line, value => ansi.gray(value), width))
 	const styledHints = hintLines.map(line => leftLine(line, value => ansi.gray(value), width))
 
-	// Full composition: wordmark, descriptor, label, then hints.
+	// Richest composition first, as the tier selector budgets for: wordmark,
+	// descriptor, label, then hints.
 	const full = [
 		...artLines,
 		blankLine(width),
@@ -208,8 +238,6 @@ export function renderHelloHeader(input: HelloHeaderInput): string[] {
 		...styledLabel,
 		...styledHints,
 	]
-	if (full.length <= height) return full
-
 	// Short terminals: keep the wordmark and hints, dropping spacing, descriptor,
 	// then the label before giving up on the brand.
 	const noGaps = [
@@ -218,9 +246,20 @@ export function renderHelloHeader(input: HelloHeaderInput): string[] {
 		...styledLabel,
 		...styledHints,
 	]
-	if (noGaps.length <= height) return noGaps
+	const brandAndHints = [...artLines, ...styledHints]
 
-	return [...artLines, ...styledHints]
+	// Only drop the hints when even the wordmark plus hints cannot fit: a
+	// centered single-line wordmark reads as the hero, whereas an overflowing
+	// group would be clipped and land back at the top.
+	const group = full.length <= height
+		? full
+		: noGaps.length <= height
+			? noGaps
+			: brandAndHints.length <= height
+				? brandAndHints
+				: artLines
+
+	return centerVertically(group, height, width)
 }
 
 /**

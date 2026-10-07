@@ -29,6 +29,17 @@ export interface TuiLayout {
 }
 
 /**
+ * Rows occupied by fixed chrome at `width`, measured from the real components
+ * rather than assumed. The transcript viewport is the terminal height minus
+ * this, so the centered empty-state hero follows a grown composer, an open
+ * picker, or a status row instead of overlapping them.
+ */
+export function fixedChromeRows(components: readonly Component[], width: number): number {
+	const safeWidth = Math.max(1, Math.floor(width))
+	return components.reduce((rows, component) => rows + component.render(safeWidth).length, 0)
+}
+
+/**
  * Compose the approved MiniCode TUI layout:
  *
  * ```text

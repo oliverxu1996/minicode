@@ -8,10 +8,13 @@ All notable changes to MiniCode will be documented in this file.
 
 - An empty transcript now opens with a large `MINICODE` block wordmark and the
   descriptor "an opinionated coding agent", followed by the existing keyboard
-  hints. The banner is the transcript header, so it scrolls away as output
-  grows and returns when `/new` starts a fresh session. It scales to the
-  terminal (5-row wordmark, then 3-row, then a single-line fallback) and never
-  blocks the composer, which stays focused and usable immediately.
+  hints. The whole hero is centered as a group in the transcript viewport —
+  horizontally, and vertically within the available transcript height (never
+  against the whole terminal, so it cannot overlap the composer/footer). The
+  banner is the transcript header, so it scrolls away as output grows and
+  returns when `/new` starts a fresh session. It scales to the terminal (5-row
+  wordmark, then 3-row, then a single-line fallback) and never blocks the
+  composer, which stays focused and usable immediately.
 
 ### Changed
 

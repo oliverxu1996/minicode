@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { TuiHarness } from "./testing"
+import { fixedChromeRows } from "./layout"
 
 /** Scrollbar glyphs are painted over the last column of the scroll region. */
 function clean(line: string): string {
@@ -158,6 +159,21 @@ describe("Layout: terminal size policy", () => {
 		const rows = screen(h)
 		expect(rows).toHaveLength(10)
 		for (const line of rows) expect(line.length).toBeLessThanOrEqual(1)
+	})
+})
+
+describe("Layout: fixed chrome measurement", () => {
+	test("fixedChromeRows equals the transcript viewport the layout actually allocates", () => {
+		const cases: Array<{ statusRows?: number; editorText?: string }> = [
+			{},
+			{ statusRows: 2 },
+			{ editorText: "a\nb\nc\nd\ne\nf" },
+		]
+		for (const options of cases) {
+			const h = new TuiHarness({ width: 80, height: 24, chatLines: 0, ...options }).start()
+			const chrome = fixedChromeRows([h.status, h.picker, h.editor, h.footerRow1, h.footerRow2], 80)
+			expect(24 - chrome).toBe(h.viewportHeight)
+		}
 	})
 })
 

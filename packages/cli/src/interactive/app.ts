@@ -24,8 +24,8 @@ import {
 	type RunDisplay,
 } from "../projection"
 import { FooterLineView } from "./view/footer"
-import { KEYBOARD_HINTS, helloHeader, transcriptHeight } from "./view/banner"
-import { buildTuiLayout } from "./view/layout"
+import { KEYBOARD_HINTS, helloHeader } from "./view/banner"
+import { buildTuiLayout, fixedChromeRows } from "./view/layout"
 import { runCompaction } from "./compaction"
 import { Selector, PickerSlot, pickerVisibleItems, type SelectorItem } from "./view/selector"
 import { SessionManager, type SessionManagerAction } from "./view/session-manager"
@@ -168,12 +168,14 @@ export class MiniCodeTui {
 
 		// The header is the transcript's empty state: the hello banner while the
 		// transcript is empty, scrolling away as output grows, and naturally back
-		// after `/new` clears it. The bottom chrome is untouched and the banner
-		// never blocks the composer.
+		// after `/new` clears it. It is centered as a hero inside the transcript
+		// viewport, which is measured live from the fixed bottom chrome so a
+		// grown composer, an open picker, or a status row can never make the hero
+		// overshoot into the composer/footer. It never blocks the composer.
 		const header = helloHeader({
 			label: options.label ?? this.session.cwd,
 			hints: KEYBOARD_HINTS,
-			availableHeight: () => transcriptHeight(this.tui.terminal.rows),
+			availableHeight: () => this.transcriptViewportHeight(),
 		})
 
 		this.editor = this.createEditor()
@@ -200,6 +202,21 @@ export class MiniCodeTui {
 		this.replaySession()
 		void this.refreshFooterData()
 		this.updateFooter()
+	}
+
+	/**
+	 * The live transcript viewport height: the terminal minus every fixed bottom
+	 * region (status, picker, composer, and the two footer rows). It is measured
+	 * from the real components — not assumed to be a constant — so a multiline
+	 * composer, an open picker, or a status row shrinks the area the centered
+	 * hero is centered in, rather than letting the hero overlap the chrome.
+	 */
+	private transcriptViewportHeight(): number {
+		const chromeRows = fixedChromeRows(
+			[this.status, this.picker, this.editor, this.footerRow1, this.footerRow2],
+			this.tui.terminal.columns,
+		)
+		return Math.max(0, this.tui.terminal.rows - chromeRows)
 	}
 
 	private buildCommandContext(): CommandContext {
