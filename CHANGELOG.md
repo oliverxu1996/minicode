@@ -6,6 +6,11 @@ All notable changes to MiniCode will be documented in this file.
 
 ### Changed
 
+- Project-local prompts (`.minicode/prompts/*.md`) and skills
+  (`.minicode/skills/<name>/SKILL.md`) now load unconditionally. The
+  per-project trust decision was removed, so no consent step is required
+  before these resources reach the model. Global resources under
+  `~/.minicode/` are unchanged.
 - `/model` is now a single command with no subcommands or argument forms. It
   opens one picker that selects an existing configured model or offers
   `Add model…`, which launches the guided configuration wizard. Model
@@ -22,6 +27,10 @@ All notable changes to MiniCode will be documented in this file.
 
 ### Removed
 
+- Slash command `/trust` and the project-trust mechanism behind it
+  (`isProjectTrusted`, `trustProject`, and the `projectTrusted` settings
+  key). Existing `.minicode/settings.json` files that still contain
+  `projectTrusted` remain valid; the key is simply ignored.
 - Slash commands `/import` and `/export`. Session portability is not a
   current product need; sessions are still persisted and recovered through
   `--continue`, `--resume`, and `/session`.

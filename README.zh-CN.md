@@ -139,7 +139,7 @@ MiniCode 支持两种协议，因此既可以对接官方 API，也可以对接�
 | `/session` | 管理当前工作区的会话（打开、搜索、重命名、删除、分叉、复制、相关） |
 | `/new` | 在当前工作区开始一个新会话 |
 | `/model` | 选择或添加模型 |
-| `/trust` · `/reload` | 项目资源 |
+| `/reload` | 项目资源 |
 | `/quit` | 退出 |
 
 ## 项目指令
@@ -152,7 +152,7 @@ MiniCode 会读取仓库根目录下的指令文件，在开始工作之前了�
 
 找到的第一个文件会被加载进智能体的系统提示词，因此从第一条消息开始，智能体就会遵循你项目的规则。
 
-你还可以添加项目本地的**提示词模板**（`.minicode/prompts/*.md`）和**技能**（`.minicode/skills/<name>/SKILL.md`）。由于这些文件能够引导智能体的行为，MiniCode 会先请你信任它们（`/trust`），然后才会加载项目本地的内容。全局配置位于 `~/.minicode/settings.json`，并可在项目的 `.minicode/settings.json` 中覆盖。
+你还可以添加项目本地的**提示词模板**（`.minicode/prompts/*.md`）和**技能**（`.minicode/skills/<name>/SKILL.md`）。这些内容会自动加载。全局配置位于 `~/.minicode/settings.json`，并可在项目的 `.minicode/settings.json` 中覆盖。
 
 ## 脚本与自动化
 

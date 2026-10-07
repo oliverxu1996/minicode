@@ -6,7 +6,6 @@ import { configDir, copyLegacyConfigIfNeeded } from "../../src/config/dir"
 import { loadSettings, projectSettingsPath, globalSettingsPath } from "../../src/config/settings"
 import { formatProjectInstructions, loadProjectContext } from "../../src/config/context"
 import { loadResources } from "../../src/config/resources"
-import { isProjectTrusted, trustProject as trustProjectFn } from "../../src/config/trust"
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "minicode-product-test-"))
@@ -87,30 +86,31 @@ describe("project context (AC9)", () => {
   })
 })
 
-describe("resources and project trust (AC13/AC17)", () => {
-  test("project prompts are gated behind trust", () => {
+describe("resources (AC13/AC17)", () => {
+  test("project prompts load without any trust state", () => {
     const dir = tempDir()
     const promptsDir = join(dir, ".minicode", "prompts")
     mkdirSync(promptsDir, { recursive: true })
     writeFileSync(join(promptsDir, "review.md"), "Review the diff carefully.")
 
-    const untrusted = loadResources(dir, false)
-    expect(untrusted.prompts).toEqual([])
-    expect(untrusted.untrustedProjectResources).toBe(true)
-
-    const trusted = loadResources(dir, true)
-    expect(trusted.prompts).toEqual([{ name: "review", content: "Review the diff carefully.", source: "project" }])
+    const resources = loadResources(dir)
+    expect(resources.prompts).toEqual([{ name: "review", content: "Review the diff carefully.", source: "project" }])
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("trust decision persists", () => {
+  test("project skills load without any trust state", () => {
     const dir = tempDir()
-    trustProjectFn(dir)
-    expect(isProjectTrusted(dir)).toBe(true)
+    const skillDir = join(dir, ".minicode", "skills", "demo")
+    mkdirSync(skillDir, { recursive: true })
+    const content = "description: Demo skill\n\nDo the demo thing.\n"
+    writeFileSync(join(skillDir, "SKILL.md"), content)
+
+    const resources = loadResources(dir)
+    expect(resources.skills).toEqual([{ name: "demo", description: "Demo skill", content, source: "project" }])
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("user prompt templates load without trust", () => {
+  test("global prompts and skills still load", () => {
     const dir = tempDir()
     const previous = process.env.MINICODE_CONFIG_DIR
     process.env.MINICODE_CONFIG_DIR = dir
@@ -118,8 +118,16 @@ describe("resources and project trust (AC13/AC17)", () => {
       const promptsDir = join(dir, "prompts")
       mkdirSync(promptsDir, { recursive: true })
       writeFileSync(join(promptsDir, "daily.md"), "Do the daily thing.")
-      const resources = loadResources(dir, false)
+      const skillDir = join(dir, "skills", "daily")
+      mkdirSync(skillDir, { recursive: true })
+      const skillContent = "description: Daily skill\n\nDo the daily thing.\n"
+      writeFileSync(join(skillDir, "SKILL.md"), skillContent)
+
+      const resources = loadResources(dir)
       expect(resources.prompts).toEqual([{ name: "daily", content: "Do the daily thing.", source: "user" }])
+      expect(resources.skills).toEqual([
+        { name: "daily", description: "Daily skill", content: skillContent, source: "user" },
+      ])
     } finally {
       if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
       else process.env.MINICODE_CONFIG_DIR = previous

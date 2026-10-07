@@ -139,7 +139,7 @@ MiniCode는 두 가지 프로토콜을 지원합니다. 공식 API와 호환 가
 | `/session` | 이 워크스페이스의 세션 관리(열기·검색·이름 변경·삭제·분기·복제·관련) |
 | `/new` | 같은 워크스페이스에서 새 세션 시작 |
 | `/model` | 모델 선택 또는 추가 |
-| `/trust` · `/reload` | 프로젝트 리소스 |
+| `/reload` | 프로젝트 리소스 |
 | `/quit` | 종료 |
 
 ## 프로젝트 지침
@@ -152,7 +152,7 @@ MiniCode는 저장소 루트의 지시 파일을 읽어 작업 시작 전에 프
 
 가장 먼저 발견된 파일이 에이전트의 시스템 프롬프트에 로드되므로, 첫 메시지부터 프로젝트의 규칙을 따릅니다.
 
-프로젝트 로컬 **프롬프트 템플릿**(`.minicode/prompts/*.md`)과 **스킬**(`.minicode/skills/<name>/SKILL.md`)을 추가할 수도 있습니다. 이 파일들은 에이전트의 동작을 이끌 수 있기 때문에, MiniCode는 프로젝트 로컬 리소스를 불러오기 전에 `/trust`로 신뢰 결정을 요청합니다. 전역 설정은 `~/.minicode/settings.json`에 있으며 프로젝트의 `.minicode/settings.json`으로 재정의할 수 있습니다.
+프로젝트 로컬 **프롬프트 템플릿**(`.minicode/prompts/*.md`)과 **스킬**(`.minicode/skills/<name>/SKILL.md`)을 추가할 수도 있습니다. 이들은 자동으로 로드됩니다. 전역 설정은 `~/.minicode/settings.json`에 있으며 프로젝트의 `.minicode/settings.json`으로 재정의할 수 있습니다.
 
 ## 스크립트와 자동화
 

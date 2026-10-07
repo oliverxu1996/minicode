@@ -13,7 +13,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import type { ModelLimits } from "@minicode/model"
 import type { MiniCode, RunEvent, Session, SessionMessage, Skill } from "@minicode/agent"
-import { configDir, isProjectTrusted, loadResources, loadSettings } from "@minicode/agent"
+import { configDir, loadResources, loadSettings } from "@minicode/agent"
 import { ansi, markdownTheme } from "./view/theme"
 import {
 	NO_RUN_DISPLAY,
@@ -267,8 +267,7 @@ export class MiniCodeTui {
 	private currentSkills: Skill[] = []
 
 	private refreshTemplates(): void {
-		const trusted = isProjectTrusted(this.session.cwd)
-		const resources = loadResources(this.session.cwd, trusted)
+		const resources = loadResources(this.session.cwd)
 		this.promptTemplates = resources.prompts.map(prompt => ({
 			name: prompt.name,
 			description: `template · ${prompt.source}`,

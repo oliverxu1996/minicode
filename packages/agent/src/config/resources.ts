@@ -6,9 +6,7 @@ import { configDir } from "./dir"
  * Project/user resources: prompt templates and skills.
  *
  * - Global resources live under `~/.minicode/` and always load.
- * - Project resources live under `<cwd>/.minicode/` and load only after the
- *   project has been trusted (`/trust`), because their content reaches the
- *   model and can direct the agent to execute commands.
+ * - Project resources live under `<cwd>/.minicode/` and always load.
  */
 
 export interface PromptTemplate {
@@ -29,8 +27,6 @@ export interface Skill {
 export interface LoadedResources {
   prompts: PromptTemplate[]
   skills: Skill[]
-  /** Project resources that were skipped because the project is untrusted. */
-  untrustedProjectResources: boolean
 }
 
 export function userResourceDir(): string {
@@ -73,10 +69,10 @@ function readSkillDirs(root: string): Skill[] {
   return out
 }
 
-/** Loads resources with the project-trust gate. `trusted` comes from the
- *  persisted project-trust decision (see trust.ts). */
-export function loadResources(cwd: string, trusted: boolean): LoadedResources {
-  const result: LoadedResources = { prompts: [], skills: [], untrustedProjectResources: false }
+/** Loads global and project resources. Project-local resources (.minicode/
+ *  prompts and skills) load unconditionally. */
+export function loadResources(cwd: string): LoadedResources {
+  const result: LoadedResources = { prompts: [], skills: [] }
 
   const userDir = userResourceDir()
   for (const file of readMdFiles(join(userDir, "prompts"))) {
@@ -86,14 +82,6 @@ export function loadResources(cwd: string, trusted: boolean): LoadedResources {
 
   const projectPrompts = join(projectResourceDir(cwd), "prompts")
   const projectSkills = join(projectResourceDir(cwd), "skills")
-  const hasProjectResources =
-    existsSync(projectPrompts) && readMdFiles(projectPrompts).length > 0 ||
-    existsSync(projectSkills) && readSkillDirs(projectSkills).length > 0
-
-  if (hasProjectResources && !trusted) {
-    result.untrustedProjectResources = true
-    return result
-  }
 
   for (const file of readMdFiles(projectPrompts)) {
     result.prompts.push({ ...file, source: "project" })

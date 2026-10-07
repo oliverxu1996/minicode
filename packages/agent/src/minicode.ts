@@ -7,7 +7,6 @@ import type { SessionStatus } from "./session/types"
 import { CODING_TOOLS } from "./tools"
 import { runTask, type RunResult } from "./loop/run"
 import { loadSettings } from "./config/settings"
-import { isProjectTrusted } from "./config/trust"
 import { formatProjectInstructions, loadProjectContext } from "./config/context"
 import { loadResources } from "./config/resources"
 import { configDir } from "./config/dir"
@@ -76,8 +75,7 @@ export class MiniCode {
     // Project context, settings, and resources load per run so edits apply
     // without restarting.
     const settings = loadSettings(session.cwd)
-    const trusted = isProjectTrusted(session.cwd)
-    const resources = loadResources(session.cwd, trusted)
+    const resources = loadResources(session.cwd)
     const contextFile = loadProjectContext(session.cwd)
     const projectInstructions = formatProjectInstructions(contextFile)
 

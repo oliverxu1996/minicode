@@ -33,7 +33,7 @@ minicode -c -p "now fix what you found"           # continue last session
 `AGENTS.md` (or `CLAUDE.md`) in the repository root is loaded into the
 agent's system prompt. `.minicode/settings.json`, `.minicode/prompts/*.md`
 and `.minicode/skills/<name>/SKILL.md` add project settings, prompt
-templates, and skills (loaded after `/trust`).
+templates, and skills (loaded automatically).
 
 Configuration and sessions live under your user config directory
 (`~/.minicode/`) — never inside

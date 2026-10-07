@@ -1,5 +1,4 @@
 import type { CompactionOutcome, Session, Skill } from "@minicode/agent"
-import { trustProject } from "@minicode/agent"
 import type { ModelProtocol } from "@minicode/model"
 
 /**
@@ -371,14 +370,6 @@ export const COMMANDS: Command[] = [
       const encoded = Buffer.from(text, "utf-8").toString("base64")
       process.stdout.write(`\x1b]52;c;${encoded}\x07`)
       ctx.notify("last response copied to the system clipboard")
-    },
-  },
-  {
-    name: "trust",
-    description: "Trust this project's local resources (prompts, skills)",
-    execute(ctx) {
-      trustProject(ctx.session().cwd)
-      ctx.notify("project trusted — project prompts and skills are now loaded (use /reload)")
     },
   },
   {

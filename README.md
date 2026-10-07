@@ -144,7 +144,7 @@ If MiniCode is interrupted mid-task, the next start reconciles the interrupted w
 | `/session` | Manage sessions in this workspace (open, search, rename, delete, fork, clone, related) |
 | `/new` | Start a fresh session in the same workspace |
 | `/model` | Select or add a model |
-| `/trust` · `/reload` | Project resources |
+| `/reload` | Project resources |
 | `/quit` | Exit |
 
 ## Project instructions
@@ -157,7 +157,7 @@ MiniCode reads instruction files from your repository root to understand your pr
 
 The first file found is loaded into the agent's system prompt, so the agent follows your project's rules from the first message.
 
-You can also add project-local **prompt templates** (`.minicode/prompts/*.md`) and **skills** (`.minicode/skills/<name>/SKILL.md`). Because these files can direct the agent, MiniCode asks you to trust them first (`/trust`) before it loads project-local ones. Global settings live in `~/.minicode/settings.json` and can be overridden per project in `.minicode/settings.json`.
+You can also add project-local **prompt templates** (`.minicode/prompts/*.md`) and **skills** (`.minicode/skills/<name>/SKILL.md`). These load automatically. Global settings live in `~/.minicode/settings.json` and can be overridden per project in `.minicode/settings.json`.
 
 ## Scripting and automation
 

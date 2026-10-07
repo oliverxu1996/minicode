@@ -10,7 +10,7 @@ import { MiniCodeAutocomplete } from "./input/autocomplete"
 describe("commands (AC12)", () => {
   test("core commands exist with descriptions", () => {
     const names = COMMANDS.map(c => c.name)
-    for (const name of ["help", "model", "new", "session", "compact", "copy", "trust", "reload", "quit"]) {
+    for (const name of ["help", "model", "new", "session", "compact", "copy", "reload", "quit"]) {
       expect(names).toContain(name)
     }
     expect(findCommand("model")?.description.length).toBeGreaterThan(0)
@@ -23,6 +23,12 @@ describe("commands (AC12)", () => {
     for (const name of ["import", "export", "hotkeys"]) {
       expect(findCommand(name)).toBeUndefined()
     }
+  })
+
+  test("the retired /trust command no longer exists", () => {
+    // Project-local prompts and skills now load unconditionally, so the
+    // project-trust concept has no command surface.
+    expect(findCommand("trust")).toBeUndefined()
   })
 
   test("the retired login/logout commands no longer exist", () => {
@@ -66,8 +72,8 @@ describe("commands (AC12)", () => {
     }
   })
 
-  test("/help and autocomplete no longer advertise import/export/hotkeys", async () => {
-    const removed = ["/import", "/export", "/hotkeys"]
+  test("/help and autocomplete no longer advertise removed commands", async () => {
+    const removed = ["/import", "/export", "/hotkeys", "/trust"]
 
     const notices: string[] = []
     const ctx = { notify: (text: string) => { notices.push(text) } } as unknown as CommandContext

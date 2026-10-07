@@ -8,7 +8,7 @@
  * That is the whole reason this file exists — it is not a general constants
  * module, and nothing unrelated belongs in it.
  *
- * `.minicode` holds per-project settings and trust, so it is not repository
+ * `.minicode` holds per-project settings and resources, so it is not repository
  * content an agent should read or complete against. Spilled tool output is not
  * listed here: it lives in the OS temp directory (`tools/truncate.ts`), never
  * inside the workspace.
