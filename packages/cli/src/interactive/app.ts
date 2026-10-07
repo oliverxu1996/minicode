@@ -28,6 +28,7 @@ import { buildTuiLayout } from "./view/layout"
 import { runCompaction } from "./compaction"
 import { Selector, PickerSlot, pickerVisibleItems, type SelectorItem } from "./view/selector"
 import { MiniCodeAutocomplete } from "./input/autocomplete"
+import { argumentPlaceholderFor } from "./input/argument-placeholder"
 import { altEnterAsNewline } from "./input/alt-enter"
 import { expandFileReferences } from "./input/expand"
 import { COMMANDS, findCommand, type CommandContext, type CompactResult } from "./commands"
@@ -275,16 +276,20 @@ export class MiniCodeTui {
 	// ── editor ───────────────────────────────────────────────────────
 
 	private createEditor(): Editor {
-		const editor = new Editor(this.tui, {
-			borderColor: (text) => ansi.gray(text),
-			selectList: {
-				selectedPrefix: (text) => ansi.green(text),
-				selectedText: (text) => ansi.bold(text),
-				description: (text) => ansi.gray(text),
-				scrollInfo: (text) => ansi.gray(text),
-				noMatch: (text) => ansi.red(text),
+		const editor = new Editor(
+			this.tui,
+			{
+				borderColor: (text) => ansi.gray(text),
+				selectList: {
+					selectedPrefix: (text) => ansi.green(text),
+					selectedText: (text) => ansi.bold(text),
+					description: (text) => ansi.gray(text),
+					scrollInfo: (text) => ansi.gray(text),
+					noMatch: (text) => ansi.red(text),
+				},
 			},
-		})
+			{ ghostTextStyle: (text) => ansi.gray(text) },
+		)
 		editor.setAutocompleteProvider(new MiniCodeAutocomplete(
 			() => [
 				...COMMANDS.map(c => ({ name: c.name, description: c.description })),
@@ -292,6 +297,7 @@ export class MiniCodeTui {
 			],
 			() => this.session.cwd,
 		))
+		editor.setGhostTextProvider(state => argumentPlaceholderFor(state, COMMANDS))
 		editor.onSubmit = (text: string) => {
 			void this.submit(text)
 		}

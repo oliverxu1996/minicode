@@ -56,7 +56,15 @@ export interface CommandContext {
 export interface Command {
   readonly name: string
   readonly description: string
+  /** Syntax/documentation shown by `/help`, e.g. `<title>`. */
   readonly argumentHint?: string
+  /**
+   * User-facing inline UI copy shown as a muted ghost placeholder in the
+   * composer while the command has no argument yet, e.g. `Name…`. Distinct
+   * from `argumentHint`: it is presentation copy, not syntax, and is only set
+   * for commands with a simple required argument.
+   */
+  readonly argumentPlaceholder?: string
   execute(ctx: CommandContext, args: string): Promise<void> | void
 }
 
@@ -499,6 +507,7 @@ export const COMMANDS: Command[] = [
     name: "name",
     description: "Name the current session",
     argumentHint: "<title>",
+    argumentPlaceholder: "Name…",
     async execute(ctx, args) {
       const title = args.trim()
       if (title.length === 0) {
@@ -584,6 +593,7 @@ export const COMMANDS: Command[] = [
     name: "import",
     description: "Import a session from a JSONL file into a new session",
     argumentHint: "<path>",
+    argumentPlaceholder: "Path…",
     async execute(ctx, args) {
       const path = args.trim()
       if (path.length === 0) {

@@ -19,6 +19,7 @@ import {
 	getWordSegmenter,
 	isWhitespaceChar,
 	sliceByColumn,
+	truncateToWidth,
 	visibleWidth,
 } from "../utils.ts";
 import { findWordBackward, findWordForward } from "../word-navigation.ts";
@@ -248,7 +249,19 @@ export interface EditorOptions {
 	 * semantics are unchanged; autocomplete is suppressed while masked.
 	 */
 	masked?: boolean;
+	/**
+	 * Supplies render-only "ghost" text drawn muted immediately after the
+	 * cursor at the end of the input, e.g. an argument placeholder. The text is
+	 * presentation only: it is never part of the editor buffer, never returned
+	 * by `getText()`, and never submitted. Hidden while autocomplete is open or
+	 * while masked.
+	 */
+	ghostTextProvider?: (state: { lines: string[]; cursorLine: number; cursorCol: number }) => string | undefined;
+	/** Style applied to ghost text. Defaults to faint. */
+	ghostTextStyle?: (text: string) => string;
 }
+
+const DEFAULT_GHOST_TEXT_STYLE = (text: string): string => `\x1b[2m${text}\x1b[22m`;
 
 const SLASH_COMMAND_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -375,6 +388,11 @@ export class Editor implements Component, Focusable {
 	// Secret input: mask the rendered text without changing input semantics.
 	private masked: boolean = false;
 
+	// Render-only ghost text (e.g. an argument placeholder) drawn after the
+	// cursor. Never part of the buffer.
+	private ghostTextProvider?: (state: { lines: string[]; cursorLine: number; cursorCol: number }) => string | undefined;
+	private ghostTextStyle: (text: string) => string = DEFAULT_GHOST_TEXT_STYLE;
+
 	public onSubmit?: (text: string) => void;
 	public onChange?: (text: string) => void;
 	public disableSubmit: boolean = false;
@@ -388,6 +406,8 @@ export class Editor implements Component, Focusable {
 		const maxVisible = options.autocompleteMaxVisible ?? 5;
 		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
 		this.masked = options.masked === true;
+		this.ghostTextProvider = options.ghostTextProvider;
+		this.ghostTextStyle = options.ghostTextStyle ?? DEFAULT_GHOST_TEXT_STYLE;
 	}
 
 	/**
@@ -404,6 +424,34 @@ export class Editor implements Component, Focusable {
 
 	isMasked(): boolean {
 		return this.masked;
+	}
+
+	/**
+	 * Set the render-only ghost-text source, or clear it with `undefined`.
+	 * Mirroring `setMasked`, this only affects rendering and triggers a repaint.
+	 */
+	setGhostTextProvider(
+		provider?: (state: { lines: string[]; cursorLine: number; cursorCol: number }) => string | undefined,
+	): void {
+		this.ghostTextProvider = provider;
+		this.tui.requestRender();
+	}
+
+	/**
+	 * Ghost text for the cursor's line, or `undefined` when none should show.
+	 * Hidden while masked, while autocomplete is open, and unless the cursor is
+	 * at the end of its logical line.
+	 */
+	private ghostTextForCursor(): string | undefined {
+		if (this.masked || this.ghostTextProvider === undefined) return undefined;
+		if (this.autocompleteState !== null) return undefined;
+		const line = this.state.lines[this.state.cursorLine];
+		if (line === undefined || this.state.cursorCol !== line.length) return undefined;
+		return this.ghostTextProvider({
+			lines: this.state.lines,
+			cursorLine: this.state.cursorLine,
+			cursorCol: this.state.cursorCol,
+		});
 	}
 
 	/** Set of currently valid paste IDs, for marker-aware segmentation. */
@@ -620,10 +668,25 @@ export class Editor implements Component, Focusable {
 					displayText = before + marker + cursor + restAfter;
 					// lineVisibleWidth stays the same - we're replacing, not adding
 				} else {
-					// Cursor is at the end - add highlighted space
-					const cursor = "\x1b[7m \x1b[0m";
-					displayText = before + marker + cursor;
-					lineVisibleWidth = lineVisibleWidth + 1;
+					// Cursor at the end: optionally draw render-only ghost text
+					// after a single visual separator. The separator doubles as
+					// the cursor cell while focused, so real trailing whitespace
+					// (e.g. the space autocomplete inserts) does not produce a
+					// double gap. The buffer itself is untouched.
+					const ghost = this.ghostTextForCursor();
+					const ghostWidthBudget = contentWidth - visibleWidth(before.replace(/[ \t]+$/, "")) - 1;
+					const ghostText = ghost !== undefined ? truncateToWidth(ghost, Math.max(0, ghostWidthBudget), "") : "";
+					if (ghostText.length > 0) {
+						const realText = before.replace(/[ \t]+$/, "");
+						const separator = emitCursorMarker ? "\x1b[7m \x1b[0m" : " ";
+						displayText = realText + marker + separator + this.ghostTextStyle(ghostText);
+						lineVisibleWidth = visibleWidth(realText) + 1 + visibleWidth(ghostText);
+					} else {
+						// Cursor is at the end - add highlighted space
+						const cursor = "\x1b[7m \x1b[0m";
+						displayText = before + marker + cursor;
+						lineVisibleWidth = lineVisibleWidth + 1;
+					}
 					// If cursor overflows content width into the padding, flag it
 					if (lineVisibleWidth > contentWidth && paddingX > 0) {
 						cursorInPadding = true;
