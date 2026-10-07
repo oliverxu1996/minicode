@@ -75,12 +75,6 @@ export interface Command {
   execute(ctx: CommandContext, args: string): Promise<void> | void
 }
 
-function exportPath(session: Session, path: string | undefined): string {
-  if (path !== undefined && path.trim().length > 0) return path.trim()
-  const short = session.id.slice(0, 8)
-  return `${session.cwd}/minicode-session-${short}.jsonl`
-}
-
 // ── model management (/model) ────────────────────────────────────────
 //
 // `/model` is the sole model surface: it opens a picker that selects the active
@@ -380,46 +374,6 @@ export const COMMANDS: Command[] = [
     },
   },
   {
-    name: "export",
-    description: "Export the session to a JSONL file",
-    argumentHint: "[path]",
-    async execute(ctx, args) {
-      const path = exportPath(ctx.session(), args.trim().length > 0 ? args : undefined)
-      const lines = ctx.session().messages.map(m => JSON.stringify({ role: m.role, content: m.content, timestamp: m.timestamp }))
-      const { writeFileSync } = await import("node:fs")
-      writeFileSync(path, lines.join("\n") + "\n", "utf-8")
-      ctx.notify(`session exported to ${path}`)
-    },
-  },
-  {
-    name: "import",
-    description: "Import a session from a JSONL file into a new session",
-    argumentHint: "<path>",
-    argumentPlaceholder: "Path…",
-    async execute(ctx, args) {
-      const path = args.trim()
-      if (path.length === 0) {
-        ctx.notify("usage: /import <path>", true)
-        return
-      }
-      const { readFileSync } = await import("node:fs")
-      let messages: Array<{ role: string; content: unknown }>
-      try {
-        messages = readFileSync(path, "utf-8")
-          .split("\n")
-          .filter(l => l.trim().length > 0)
-          .map(l => JSON.parse(l))
-      } catch (err) {
-        ctx.notify(`import failed: ${err instanceof Error ? err.message : err}`, true)
-        return
-      }
-      const session = ctx.agent().createSession(ctx.session().cwd)
-      await session.replaceMessages(messages as import("@minicode/model").ModelMessage[])
-      ctx.setSession(session)
-      ctx.notify(`imported ${messages.length} messages into session ${session.id.slice(0, 8)}`)
-    },
-  },
-  {
     name: "trust",
     description: "Trust this project's local resources (prompts, skills)",
     execute(ctx) {
@@ -436,21 +390,6 @@ export const COMMANDS: Command[] = [
       // the confirmation below is true rather than merely printed.
       ctx.reloadResources()
       ctx.notify("reloaded settings, project context, prompts, and skills")
-    },
-  },
-  {
-    name: "hotkeys",
-    description: "Show keyboard shortcuts",
-    execute(ctx) {
-      ctx.notify(
-        [
-          "enter — submit · alt+enter / shift+enter / ctrl+j — newline",
-          "esc — interrupt the running task",
-          "ctrl+c — clear input; twice within 500ms exits",
-          "ctrl+d — exit (empty editor) · ctrl+o — expand tool output",
-          "ctrl+p — cycle model",
-        ].join("\n"),
-      )
     },
   },
   {

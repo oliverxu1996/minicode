@@ -10,11 +10,10 @@
  * `@minicode/agent`.
  */
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { MiniCode, type Session } from "@minicode/agent"
-import { findCommand, type CommandContext } from "./commands"
 import { cloneSession, forkSession } from "./session/operations"
 
 interface Fixture {
@@ -38,25 +37,6 @@ function fixture(): Fixture {
       await new MiniCode({ sessionsDir }).loadSession(id),
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   }
-}
-
-/** A command context over a real runtime, so persistence is real too. */
-function context(agent: MiniCode, session: Session, picked: string | null = null) {
-  let active = session
-  const notices: string[] = []
-  const ctx = {
-    agent: () => agent,
-    session: () => active,
-    setSession: (next: Session) => { active = next },
-    notify: (text: string) => { notices.push(text) },
-    pick: async () => picked,
-    ask: async () => null,
-    compact: async () => ({ status: "no-model" }) as const,
-    submitTask: async () => {},
-    skills: () => [],
-    reloadResources: () => {},
-  } as unknown as CommandContext
-  return { ctx, notices, current: (): Session => active }
 }
 
 async function seed(session: Session): Promise<void> {
@@ -96,26 +76,6 @@ describe("session lifecycle durability (Work 3)", () => {
     expect(reloaded.parentSessionId).toBe(session.id)
     expect(reloaded.messages.map(m => m.role)).toEqual(["user", "assistant", "user"])
     expect((reloaded.messages[0] as { content: string }).content).toBe("first task")
-    f.cleanup()
-  })
-
-  test("AC3 — /import is durable when the command returns", async () => {
-    const f = fixture()
-    const session = f.agent.createSession(f.dir)
-    const jsonl = join(f.dir, "import.jsonl")
-    writeFileSync(jsonl, [
-      JSON.stringify({ role: "user", content: "imported one" }),
-      JSON.stringify({ role: "assistant", content: "imported two" }),
-    ].join("\n"))
-
-    const { ctx, current } = context(f.agent, session)
-    await findCommand("import")!.execute(ctx, jsonl)
-    const imported = current()
-
-    const reloaded = await f.reload(imported.id)
-    expect(reloaded.messages).toHaveLength(2)
-    expect((reloaded.messages[0] as { content: string }).content).toBe("imported one")
-    expect((reloaded.messages[1] as { content: string }).content).toBe("imported two")
     f.cleanup()
   })
 

@@ -22,6 +22,11 @@ All notable changes to MiniCode will be documented in this file.
 
 ### Removed
 
+- Slash commands `/import` and `/export`. Session portability is not a
+  current product need; sessions are still persisted and recovered through
+  `--continue`, `--resume`, and `/session`.
+- Slash command `/hotkeys`. The always-visible header and `/help` already
+  describe the keyboard shortcuts.
 - Slash commands `/login` and `/logout`. They were never authentication —
   they configured and removed local models. `/model` is now the sole model
   surface (select or add).

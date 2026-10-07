@@ -141,13 +141,10 @@ If MiniCode is interrupted mid-task, the next start reconciles the interrupted w
 | `/help` | List all commands |
 | `/compact` | Manually summarize the context |
 | `/copy` | Copy the last response to the clipboard |
-| `/export [path]` | Export the session to JSONL |
-| `/import <path>` | Import a session from a JSONL file |
 | `/session` | Manage sessions in this workspace (open, search, rename, delete, fork, clone, related) |
 | `/new` | Start a fresh session in the same workspace |
 | `/model` | Select or add a model |
 | `/trust` · `/reload` | Project resources |
-| `/hotkeys` | Show all keyboard shortcuts |
 | `/quit` | Exit |
 
 ## Project instructions

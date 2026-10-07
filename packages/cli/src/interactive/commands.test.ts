@@ -5,17 +5,24 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { COMMANDS, findCommand, type CommandContext, type CompactResult } from "./commands"
-import { argumentPlaceholderFor } from "./input/argument-placeholder"
 import { MiniCodeAutocomplete } from "./input/autocomplete"
 
 describe("commands (AC12)", () => {
   test("core commands exist with descriptions", () => {
     const names = COMMANDS.map(c => c.name)
-    for (const name of ["help", "model", "new", "session", "compact", "copy", "export", "import", "trust", "reload", "hotkeys", "quit"]) {
+    for (const name of ["help", "model", "new", "session", "compact", "copy", "trust", "reload", "quit"]) {
       expect(names).toContain(name)
     }
     expect(findCommand("model")?.description.length).toBeGreaterThan(0)
     expect(findCommand("nonexistent")).toBeUndefined()
+  })
+
+  test("the retired import/export/hotkeys commands no longer exist", () => {
+    // Portability (import/export) and the redundant hotkey listing are gone
+    // from the TUI surface; none may remain discoverable or dispatchable.
+    for (const name of ["import", "export", "hotkeys"]) {
+      expect(findCommand(name)).toBeUndefined()
+    }
   })
 
   test("the retired login/logout commands no longer exist", () => {
@@ -59,10 +66,27 @@ describe("commands (AC12)", () => {
     }
   })
 
-  test("the /name placeholder is gone while /import keeps its Path… placeholder", () => {
-    const state = (line: string) => ({ lines: [line], cursorLine: 0, cursorCol: line.length })
-    expect(argumentPlaceholderFor(state("/name "), COMMANDS)).toBeUndefined()
-    expect(argumentPlaceholderFor(state("/import "), COMMANDS)).toBe("Path…")
+  test("/help and autocomplete no longer advertise import/export/hotkeys", async () => {
+    const removed = ["/import", "/export", "/hotkeys"]
+
+    const notices: string[] = []
+    const ctx = { notify: (text: string) => { notices.push(text) } } as unknown as CommandContext
+    findCommand("help")!.execute(ctx, "")
+    const help = notices.join("\n")
+    for (const name of removed) {
+      expect(help).not.toContain(name)
+    }
+
+    const provider = new MiniCodeAutocomplete(
+      () => COMMANDS.map(command => ({ name: command.name, description: command.description })),
+      () => process.cwd(),
+    )
+    const suggestions = await provider.getSuggestions(["/"], 0, 1)
+    expect(suggestions).not.toBeNull()
+    const labels = suggestions!.items.map(item => item.label)
+    for (const name of removed) {
+      expect(labels).not.toContain(name)
+    }
   })
 
   test("/model is a single command with no argument syntax", () => {
@@ -159,30 +183,6 @@ describe("/quit lifecycle", () => {
     } as unknown as CommandContext
     await findCommand("quit")!.execute(ctx, "")
     expect(quitCalls).toBe(1)
-  })
-})
-
-describe("/hotkeys documentation", () => {
-  test("advertises the current submit/newline keys and no follow-up queue", async () => {
-    const notices: string[] = []
-    const ctx = { notify: (text: string) => { notices.push(text) } } as unknown as CommandContext
-
-    await findCommand("hotkeys")!.execute(ctx, "")
-
-    expect(notices).toHaveLength(1)
-    const text = notices[0]!
-
-    // The retired Alt+Enter follow-up queue must not be advertised anymore.
-    expect(text).not.toMatch(/queue/i)
-    expect(text).not.toMatch(/follow[\s-]?up/i)
-
-    // Enter submits; Alt+Enter / Shift+Enter / Ctrl+J insert a newline.
-    const submitLine = text.split("\n")[0]!
-    expect(submitLine).toContain("enter — submit")
-    expect(submitLine).toContain("alt+enter")
-    expect(submitLine).toContain("shift+enter")
-    expect(submitLine).toContain("ctrl+j")
-    expect(submitLine).toContain("newline")
   })
 })
 
