@@ -15,6 +15,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { MiniCode, type Session } from "@minicode/agent"
 import { findCommand, type CommandContext } from "./commands"
+import { cloneSession, forkSession } from "./session/operations"
 
 interface Fixture {
   readonly dir: string
@@ -65,14 +66,13 @@ async function seed(session: Session): Promise<void> {
 }
 
 describe("session lifecycle durability (Work 3)", () => {
-  test("AC1 — /fork is durable when the command returns", async () => {
+  test("AC1 — a fork is durable when it returns", async () => {
     const f = fixture()
     const session = f.agent.createSession(f.dir)
     await seed(session)
 
-    const { ctx, current } = context(f.agent, session, "0")
-    await findCommand("fork")!.execute(ctx, "")
-    const forked = current()
+    // `/session` fork: cut after the first user message (index 0 -> cut 1).
+    const forked = await forkSession(f.agent, session, 1)
     expect(forked.id).not.toBe(session.id)
 
     // Reload through a fresh runtime: nothing else may be required.
@@ -84,14 +84,12 @@ describe("session lifecycle durability (Work 3)", () => {
     f.cleanup()
   })
 
-  test("AC2 — /clone is durable when the command returns", async () => {
+  test("AC2 — a clone is durable when it returns", async () => {
     const f = fixture()
     const session = f.agent.createSession(f.dir)
     await seed(session)
 
-    const { ctx, current } = context(f.agent, session)
-    await findCommand("clone")!.execute(ctx, "")
-    const clone = current()
+    const clone = await cloneSession(f.agent, session)
     expect(clone.id).not.toBe(session.id)
 
     const reloaded = await f.reload(clone.id)
@@ -128,9 +126,7 @@ describe("session lifecycle durability (Work 3)", () => {
 
     // Fork, then reload WITHOUT running anything, switching sessions, or
     // shutting the runtime down.
-    const { ctx, current } = context(f.agent, session, "0")
-    await findCommand("fork")!.execute(ctx, "")
-    const forked = current()
+    const forked = await forkSession(f.agent, session, 1)
 
     const reloaded = await f.reload(forked.id)
     expect(reloaded.messages).toHaveLength(1)

@@ -146,6 +146,13 @@ export class MiniCode {
   async sessionSummaries(): Promise<Array<{
     id: string
     cwd: string
+    /**
+     * True when the snapshot actually persisted a `cwd`. `Session.fromJSON`
+     * defaults a missing `cwd` to the loading process's directory, so a
+     * consumer that scopes by workspace needs to distinguish a real path from
+     * that fallback.
+     */
+    cwdPresent: boolean
     title: string | null
     parentSessionId: string | null
     updatedAt: number
@@ -155,6 +162,7 @@ export class MiniCode {
     const out: Array<{
       id: string
       cwd: string
+      cwdPresent: boolean
       title: string | null
       parentSessionId: string | null
       updatedAt: number
@@ -167,11 +175,13 @@ export class MiniCode {
         // is a view of a session, so it must not be a second, unchecked
         // interpretation of the persisted format — the picker's counts and
         // titles could otherwise disagree with the session actually loaded.
-        const session = Session.fromJSON(await this.store.read(id) as Record<string, unknown>)
+        const raw = await this.store.read(id) as Record<string, unknown>
+        const session = Session.fromJSON(raw)
         const firstUser = session.messages.find(m => m.role === "user")
         out.push({
           id: session.id,
           cwd: session.cwd,
+          cwdPresent: typeof raw.cwd === "string",
           title: session.title,
           parentSessionId: session.parentSessionId,
           updatedAt: session.updatedAt,
@@ -185,6 +195,17 @@ export class MiniCode {
       }
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  /**
+   * Deletes a persisted session for good: removes its snapshot and any
+   * in-memory instance. Eviction matters because `loadSession` returns a
+   * cached `Session`, so deleting only the file would let a later load
+   * resurrect the session from memory.
+   */
+  async deleteSession(id: string): Promise<void> {
+    await this.store.delete(id)
+    this.sessions.delete(id)
   }
 
   private track(session: Session): void {

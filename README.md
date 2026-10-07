@@ -128,7 +128,7 @@ While a task runs you see everything: the current iteration, each tool call with
 
 ### Sessions
 
-Your work is saved automatically. Exit and come back later — `--continue` picks up the most recent session in the workspace, `--resume <id>` restores a specific one, and `/resume` inside the TUI shows a list. Sessions can be named (`/name`), inspected (`/session`), forked from an earlier message (`/fork`), duplicated (`/clone`), and navigated (`/tree`).
+Your work is saved automatically. Exit and come back later — `--continue` picks up the most recent session in the workspace, and `--resume <id>` restores a specific one. Inside the TUI, `/session` opens an interactive manager for this workspace's sessions, where you can open, search, rename, delete, fork, clone, and browse related sessions.
 
 If MiniCode is interrupted mid-task, the next start reconciles the interrupted work: finished steps are kept, unfinished ones are reported honestly, and you can continue where things stopped.
 
@@ -141,9 +141,8 @@ If MiniCode is interrupted mid-task, the next start reconciles the interrupted w
 | `/copy` | Copy the last response to the clipboard |
 | `/export [path]` | Export the session to JSONL |
 | `/import <path>` | Import a session from a JSONL file |
-| `/name <title>` | Name the current session |
-| `/session` | Show session info and statistics |
-| `/new` · `/resume` · `/fork` · `/clone` · `/tree` | Session lifecycle and navigation |
+| `/session` | Manage sessions in this workspace (open, search, rename, delete, fork, clone, related) |
+| `/new` | Start a fresh session in the same workspace |
 | `/model` | Model selection and configuration |
 | `/trust` · `/reload` | Project resources |
 | `/hotkeys` | Show all keyboard shortcuts |

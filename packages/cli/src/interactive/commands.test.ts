@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import type { ModelConfig } from "@minicode/model"
 import { COMMANDS, findCommand, type CommandContext, type CompactResult } from "./commands"
+import { argumentPlaceholderFor } from "./input/argument-placeholder"
+import { MiniCodeAutocomplete } from "./input/autocomplete"
 
 describe("commands (AC12)", () => {
   test("core commands exist with descriptions", () => {
     const names = COMMANDS.map(c => c.name)
-    for (const name of ["help", "model", "new", "resume", "name", "session", "compact", "copy", "export", "import", "trust", "reload", "fork", "clone", "tree", "hotkeys", "quit"]) {
+    for (const name of ["help", "model", "new", "session", "compact", "copy", "export", "import", "trust", "reload", "hotkeys", "quit"]) {
       expect(names).toContain(name)
     }
     expect(findCommand("model")?.description.length).toBeGreaterThan(0)
@@ -15,6 +17,48 @@ describe("commands (AC12)", () => {
   test("the retired login/logout commands no longer exist", () => {
     expect(findCommand("login")).toBeUndefined()
     expect(findCommand("logout")).toBeUndefined()
+  })
+
+  test("session management is consolidated into /session", () => {
+    // `/session` is the single interactive session-management entry point, so
+    // the separate session commands must not remain discoverable.
+    for (const name of ["resume", "name", "tree", "fork", "clone"]) {
+      expect(findCommand(name)).toBeUndefined()
+    }
+    expect(findCommand("session")?.description).toBe("Manage sessions in this workspace")
+  })
+
+  test("/help lists only /new and /session among the session commands", () => {
+    const notices: string[] = []
+    const ctx = { notify: (text: string) => { notices.push(text) } } as unknown as CommandContext
+    findCommand("help")!.execute(ctx, "")
+    const help = notices.join("\n")
+    expect(help).toContain("/new — Start a fresh session in the same workspace")
+    expect(help).toContain("/session — Manage sessions in this workspace")
+    for (const removed of ["/resume", "/name", "/tree", "/fork", "/clone"]) {
+      expect(help).not.toContain(removed)
+    }
+  })
+
+  test("autocomplete proposes the consolidated surface and nothing removed", async () => {
+    const provider = new MiniCodeAutocomplete(
+      () => COMMANDS.map(command => ({ name: command.name, description: command.description })),
+      () => process.cwd(),
+    )
+    const suggestions = await provider.getSuggestions(["/"], 0, 1)
+    expect(suggestions).not.toBeNull()
+    const labels = suggestions!.items.map(item => item.label)
+    expect(labels).toContain("/new")
+    expect(labels).toContain("/session")
+    for (const removed of ["/resume", "/name", "/tree", "/fork", "/clone"]) {
+      expect(labels).not.toContain(removed)
+    }
+  })
+
+  test("the /name placeholder is gone while /import keeps its Path… placeholder", () => {
+    const state = (line: string) => ({ lines: [line], cursorLine: 0, cursorCol: line.length })
+    expect(argumentPlaceholderFor(state("/name "), COMMANDS)).toBeUndefined()
+    expect(argumentPlaceholderFor(state("/import "), COMMANDS)).toBe("Path…")
   })
 })
 
@@ -81,31 +125,15 @@ describe("/hotkeys documentation", () => {
   })
 })
 
-describe("selector commands share the picker path", () => {
-  test("every picker caller routes through ctx.pick with its title", async () => {
-    // Every picker caller routes through ctx.pick, and the application renders
-    // the returned selector in the shared bottom-attached picker slot, so the
-    // presentation applies uniformly rather than per command.
+describe("commands route through their context hooks", () => {
+  test("/model still routes through ctx.pick with its title", async () => {
     const pickedTitles: string[] = []
-    const now = Date.now()
-    const summary = {
-      id: "s1",
-      title: "existing",
-      firstUser: "hi",
-      messageCount: 2,
-      updatedAt: now,
-      parentSessionId: "current",
-    }
-    const userMessage = { id: "u1", role: "user", content: "hello", status: "complete", timestamp: 1 }
     const ctx = {
       agent: () => ({
         modelManager: async () => ({ list: () => [{ id: "m1" }, { id: "m2" }] }),
         currentModel: async () => ({ id: "m1" }),
-        sessionSummaries: async () => [summary],
-        loadSession: async () => ({}),
-        createSession: () => ({}),
       }),
-      session: () => ({ id: "current", cwd: "/tmp", messages: [userMessage], status: "idle" }),
+      session: () => ({ id: "current", cwd: "/tmp", messages: [], status: "idle" }),
       pick: async (title: string) => {
         pickedTitles.push(title)
         return null
@@ -115,16 +143,22 @@ describe("selector commands share the picker path", () => {
     } as unknown as CommandContext
 
     await findCommand("model")!.execute(ctx, "")
-    await findCommand("resume")!.execute(ctx, "")
-    await findCommand("fork")!.execute(ctx, "")
-    await findCommand("tree")!.execute(ctx, "")
 
-    expect(pickedTitles).toEqual([
-      "Model",
-      "Resume session",
-      "Fork from message",
-      "Forked sessions",
-    ])
+    expect(pickedTitles).toEqual(["Model"])
+  })
+
+  test("/session opens the workspace-scoped manager via ctx.manageSessions", async () => {
+    let opened = 0
+    const ctx = {
+      session: () => ({ id: "current", cwd: "/tmp", messages: [], status: "idle" }),
+      manageSessions: async () => {
+        opened += 1
+      },
+    } as unknown as CommandContext
+
+    await findCommand("session")!.execute(ctx, "")
+
+    expect(opened).toBe(1)
   })
 })
 

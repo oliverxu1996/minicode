@@ -18,7 +18,7 @@ export type CompactResult =
 export interface CommandContext {
   agent(): import("@minicode/agent").MiniCode
   session(): Session
-  /** Replaces the active session (resume/fork/clone/new) and replays it. */
+  /** Replaces the active session (new/switch/fork/clone) and replays it. */
   setSession(session: Session): void
   /** Shows a notice / error line in the chat. */
   notify(text: string, isError?: boolean): void
@@ -30,8 +30,15 @@ export interface CommandContext {
     options?: { selectedValue?: string },
   ): Promise<string | null>
   /** Prompts for a single line of input (status-prompt style). `secret` masks
-   *  the typed text so credentials are never echoed. */
-  ask(label: string, options?: { secret?: boolean }): Promise<string | null>
+   *  the typed text so credentials are never echoed. `initialValue` pre-fills
+   *  the editor (used to seed a rename with the current title). */
+  ask(label: string, options?: { secret?: boolean; initialValue?: string }): Promise<string | null>
+  /**
+   * Opens the interactive, workspace-scoped session manager (`/session`). The
+   * application owns the whole interaction and all session mutations; this is
+   * the command's only hook into it.
+   */
+  manageSessions(): Promise<void>
   /** Runs the model-based context compaction immediately. */
   compact(): Promise<CompactResult>
   /** Submits a task through the normal run path (used by templates). */
@@ -66,26 +73,6 @@ export interface Command {
    */
   readonly argumentPlaceholder?: string
   execute(ctx: CommandContext, args: string): Promise<void> | void
-}
-
-async function pickSession(ctx: CommandContext, filter?: (session: Session) => boolean): Promise<Session | null> {
-  const summaries = await ctx.agent().sessionSummaries()
-  const current = ctx.session()
-  const items = summaries
-    .filter(s => s.id !== current.id)
-    .filter(s => (filter ? filter({ id: s.id } as Session) : true))
-    .map(s => ({
-      value: s.id,
-      label: s.title ?? s.firstUser ?? "(untitled)",
-      description: `${s.messageCount} msgs · ${new Date(s.updatedAt).toLocaleString()}`,
-    }))
-  if (items.length === 0) {
-    ctx.notify("no other sessions found")
-    return null
-  }
-  const chosen = await ctx.pick("Resume session", items)
-  if (chosen === null) return null
-  return ctx.agent().loadSession(chosen)
 }
 
 function exportPath(session: Session, path: string | undefined): string {
@@ -493,45 +480,10 @@ export const COMMANDS: Command[] = [
     },
   },
   {
-    name: "resume",
-    description: "Resume a previous session",
-    async execute(ctx) {
-      const other = await pickSession(ctx)
-      if (other !== null) {
-        ctx.setSession(other)
-        ctx.notify(`resumed session ${other.id.slice(0, 8)}`)
-      }
-    },
-  },
-  {
-    name: "name",
-    description: "Name the current session",
-    argumentHint: "<title>",
-    argumentPlaceholder: "Name…",
-    async execute(ctx, args) {
-      const title = args.trim()
-      if (title.length === 0) {
-        ctx.notify("usage: /name <title>", true)
-        return
-      }
-      await ctx.session().setTitle(title)
-      ctx.notify(`session named: ${title}`)
-    },
-  },
-  {
     name: "session",
-    description: "Show session info and stats",
+    description: "Manage sessions in this workspace",
     execute(ctx) {
-      const s = ctx.session()
-      const tools = s.ledger.all.length
-      const ok = s.ledger.all.filter(e => e.status === "succeeded").length
-      ctx.notify(
-        [
-          `session ${s.id.slice(0, 8)} · ${s.status} · cwd ${s.cwd}`,
-          `messages: ${s.messages.length} · tool calls: ${tools} (${ok} succeeded)`,
-          s.title !== null ? `title: ${s.title}` : "untitled",
-        ].join("\n"),
-      )
+      return ctx.manageSessions()
     },
   },
   {
@@ -634,71 +586,6 @@ export const COMMANDS: Command[] = [
       // the confirmation below is true rather than merely printed.
       ctx.reloadResources()
       ctx.notify("reloaded settings, project context, prompts, and skills")
-    },
-  },
-  {
-    name: "fork",
-    description: "Fork a new session from a previous user message",
-    async execute(ctx) {
-      const session = ctx.session()
-      const userMessages = session.messages
-        .map((m, index) => ({ m, index }))
-        .filter(entry => entry.m.role === "user")
-      if (userMessages.length === 0) {
-        ctx.notify("nothing to fork yet", true)
-        return
-      }
-      const chosen = await ctx.pick(
-        "Fork from message",
-        userMessages.map(entry => ({
-          value: String(entry.index),
-          label: (entry.m as { content: string }).content.slice(0, 60),
-          description: `#${entry.index + 1}`,
-        })),
-      )
-      if (chosen === null) return
-      const cut = Number(chosen) + 1
-      const forked = ctx.agent().createSession(session.cwd)
-      forked.parentSessionId = session.id
-      await forked.replaceMessages(session.messages.slice(0, cut).map(m => ({ role: m.role, content: m.content })) as import("@minicode/model").ModelMessage[])
-      ctx.setSession(forked)
-      ctx.notify(`forked session ${forked.id.slice(0, 8)} from message #${cut}`)
-    },
-  },
-  {
-    name: "clone",
-    description: "Duplicate the current session",
-    async execute(ctx) {
-      const session = ctx.session()
-      const clone = ctx.agent().createSession(session.cwd)
-      clone.parentSessionId = session.id
-      await clone.replaceMessages(session.messages.map(m => ({ role: m.role, content: m.content })) as import("@minicode/model").ModelMessage[])
-      ctx.setSession(clone)
-      ctx.notify(`cloned into session ${clone.id.slice(0, 8)}`)
-    },
-  },
-  {
-    name: "tree",
-    description: "Navigate sessions forked from this one",
-    async execute(ctx) {
-      const current = ctx.session()
-      const related = (await ctx.agent().sessionSummaries())
-        .filter(s => s.parentSessionId === current.id)
-      if (related.length === 0) {
-        ctx.notify("no forked sessions under this one")
-        return
-      }
-      const chosen = await ctx.pick(
-        "Forked sessions",
-        related.map(s => ({
-          value: s.id,
-          label: s.title ?? s.firstUser ?? s.id.slice(0, 8),
-          description: `${s.messageCount} msgs`,
-        })),
-      )
-      if (chosen === null) return
-      ctx.setSession(await ctx.agent().loadSession(chosen))
-      ctx.notify("switched session")
     },
   },
   {

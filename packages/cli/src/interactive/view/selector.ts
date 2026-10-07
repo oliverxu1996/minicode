@@ -125,30 +125,48 @@ export class Selector implements Component {
   }
 }
 
+/** A component that caps how many item rows it renders. */
+interface VisibleItemCapped {
+  setMaxVisibleItems(count: number): void
+}
+
+function hasVisibleItemCap(component: Component): component is Component & VisibleItemCapped {
+  return typeof (component as { setMaxVisibleItems?: unknown }).setMaxVisibleItems === "function"
+}
+
 /**
  * The bottom-attached picker slot: a fixed-height VStack entry directly above
- * the composer. It renders the active selector, or nothing when closed, so an
+ * the composer. It renders the active component, or nothing when closed, so an
  * open picker consumes conversation viewport height instead of floating over
  * the conversation. `maxVisibleItems` is read every render so the window follows
  * terminal resizes.
+ *
+ * It hosts the generic {@link Selector} and richer transient features (such as
+ * the session manager) alike; a hosted component that supports a windowing cap
+ * is handed one each render.
  */
 export class PickerSlot implements Component {
-  private selector: Selector | null = null
+  private component: Component | null = null
 
   constructor(private readonly maxVisibleItems: () => number = () => Number.POSITIVE_INFINITY) {}
 
   /** Show `selector` in the slot, or clear it with null. */
   setSelector(selector: Selector | null): void {
-    this.selector = selector
+    this.component = selector
+  }
+
+  /** Show any transient component in the slot, or clear it with null. */
+  setComponent(component: Component | null): void {
+    this.component = component
   }
 
   invalidate(): void {
-    this.selector?.invalidate()
+    this.component?.invalidate()
   }
 
   render(width: number): string[] {
-    if (this.selector === null) return []
-    this.selector.setMaxVisibleItems(this.maxVisibleItems())
-    return this.selector.render(width)
+    if (this.component === null) return []
+    if (hasVisibleItemCap(this.component)) this.component.setMaxVisibleItems(this.maxVisibleItems())
+    return this.component.render(width)
   }
 }

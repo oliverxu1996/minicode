@@ -27,6 +27,9 @@ import { FooterLineView } from "./view/footer"
 import { buildTuiLayout } from "./view/layout"
 import { runCompaction } from "./compaction"
 import { Selector, PickerSlot, pickerVisibleItems, type SelectorItem } from "./view/selector"
+import { SessionManager, type SessionManagerAction } from "./view/session-manager"
+import { workspaceSessions, type ScopedSessionSummary } from "./session/scope"
+import { cloneSession, forkCandidates, forkSession } from "./session/operations"
 import { MiniCodeAutocomplete } from "./input/autocomplete"
 import { argumentPlaceholderFor } from "./input/argument-placeholder"
 import { altEnterAsNewline } from "./input/alt-enter"
@@ -101,6 +104,8 @@ export class MiniCodeTui {
 	private streaming: Container | null = null
 	private streamingText = ""
 	private selector: Selector | null = null
+	/** The open `/session` manager, which owns input while present. */
+	private manager: SessionManager | null = null
 	private askState: AskState | null = null
 	private promptTemplates: Array<{ name: string; description: string }> = []
 	private reasoning: Container | null = null
@@ -151,15 +156,7 @@ export class MiniCodeTui {
 			agent: () => this.options.agent,
 			session: () => this.session,
 			setSession: session => {
-				this.session = session
-				this.chat.clear()
-				this.pendingTools.clear()
-				this.replaySession()
-				this.refreshTemplates()
-				// A resumed/forked session may live in another workspace, so the
-				// footer's branch (and model) are re-read, not carried over.
-				void this.refreshFooterData()
-				this.tui.requestRender()
+				this.setActiveSession(session)
 			},
 			notify: (text, isError) => {
 				this.chat.addChild(isError === true ? errorNotice(text) : notice(text))
@@ -208,10 +205,16 @@ export class MiniCodeTui {
 					// Secret prompts mask the composer so the typed value is never
 					// echoed; every resolution path (submit or Escape) clears it.
 					this.editor.setMasked(secret)
+					// A rename is seeded with the current title so the user edits
+					// rather than retypes it; other prompts start empty.
+					this.editor.setText(options?.initialValue ?? "")
 					this.status.addChild(new Text(ansi.bold(label), 1, 0))
 					this.tui.setFocus(this.editor)
 					this.tui.requestRender()
 				})
+			},
+			manageSessions: async (): Promise<void> => {
+				await this.runSessionManager()
 			},
 			compact: async (): Promise<CompactResult> => {
 				// A manual compaction must not run concurrently with another
@@ -275,6 +278,23 @@ export class MiniCodeTui {
 
 	// ── editor ───────────────────────────────────────────────────────
 
+	/**
+	 * Replaces the active session and replays it. Owns every UI refresh a
+	 * switch requires: transcript, pending tool state, templates/context, and
+	 * the footer's workspace/model/branch.
+	 */
+	private setActiveSession(session: Session): void {
+		this.session = session
+		this.chat.clear()
+		this.pendingTools.clear()
+		this.replaySession()
+		this.refreshTemplates()
+		// A switched/forked session may live in another workspace, so the
+		// footer's branch (and model) are re-read, not carried over.
+		void this.refreshFooterData()
+		this.tui.requestRender()
+	}
+
 	private createEditor(): Editor {
 		const editor = new Editor(
 			this.tui,
@@ -307,8 +327,8 @@ export class MiniCodeTui {
 	// ── global keys ───────────────────────────────────
 
 	private handleGlobalInput(data: string): { consume?: boolean; data?: string } | undefined {
-		// An open selector owns the keyboard.
-		if (this.selector !== null) return undefined
+		// An open selector or session manager owns the keyboard.
+		if (this.selector !== null || this.manager !== null) return undefined
 
 		// Alt+Enter inserts a newline in the composer. The application used to
 		// submit/queue here; it now rewrites the event so the editor's existing
@@ -680,6 +700,229 @@ export class MiniCodeTui {
 			// Not a git repository — footer omits the branch.
 		}
 		this.updateFooter()
+	}
+
+	// ── session manager (/session) ───────────────────────────────────
+
+	/** True while a run or a manual compaction owns the active session. */
+	private sessionBusy(): boolean {
+		return this.running || this.compacting
+	}
+
+	private notifySessionBusy(): void {
+		this.chat.addChild(notice(this.running
+			? "a task is running — finish it before managing sessions"
+			: "a compaction is in progress — wait for it to finish"))
+		this.tui.requestRender()
+	}
+
+	/**
+	 * The workspace-scoped candidate set: persisted sessions whose `cwd` matches
+	 * the active workspace. The active session is included even when it has not
+	 * been persisted yet (a fresh session is only written on its first
+	 * checkpoint), so it is always visible — without ever widening the boundary.
+	 */
+	private async scopedSessions(workspace: string): Promise<ScopedSessionSummary[]> {
+		const summaries = await this.options.agent.sessionSummaries()
+		const scoped: ScopedSessionSummary[] = workspaceSessions(summaries, workspace)
+		if (!scoped.some(session => session.id === this.session.id) && this.session.cwd === workspace) {
+			scoped.unshift(this.summaryOf(this.session))
+		}
+		return scoped
+	}
+
+	private summaryOf(session: Session): ScopedSessionSummary {
+		const firstUser = session.messages.find(message => message.role === "user")
+		return {
+			id: session.id,
+			cwd: session.cwd,
+			cwdPresent: true,
+			title: session.title,
+			parentSessionId: session.parentSessionId,
+			updatedAt: session.updatedAt,
+			messageCount: session.messages.length,
+			firstUser: firstUser !== undefined && typeof firstUser.content === "string" ? firstUser.content.slice(0, 60) : null,
+		}
+	}
+
+	/** Loads a session only if it belongs to the scoped candidate set. */
+	private async loadScopedSession(scoped: readonly ScopedSessionSummary[], id: string): Promise<Session | null> {
+		if (!scoped.some(session => session.id === id)) return null
+		if (id === this.session.id) return this.session
+		try {
+			return await this.options.agent.loadSession(id)
+		} catch {
+			return null
+		}
+	}
+
+	private openSessionManager(sessions: readonly ScopedSessionSummary[]): Promise<SessionManagerAction> {
+		const manager = new SessionManager(sessions, this.session.id, `Sessions · ${this.session.cwd}`)
+		return new Promise<SessionManagerAction>(resolve => {
+			const close = (action: SessionManagerAction): void => {
+				if (this.manager !== manager) return
+				this.manager = null
+				this.picker.setComponent(null)
+				this.tui.setFocus(this.editor)
+				this.tui.requestRender()
+				resolve(action)
+			}
+			manager.onAction = close
+			this.manager = manager
+			this.picker.setComponent(manager)
+			this.tui.setFocus(manager)
+			this.tui.requestRender()
+		})
+	}
+
+	/**
+	 * Drives `/session`: open the workspace-scoped manager, execute the chosen
+	 * action, and reopen it after operations that stay within management. All
+	 * session mutations and switches are guarded against an active run, both on
+	 * open and again before each operation.
+	 */
+	private async runSessionManager(): Promise<void> {
+		if (this.sessionBusy()) {
+			this.notifySessionBusy()
+			return
+		}
+		const workspace = this.session.cwd
+
+		for (;;) {
+			const scoped = await this.scopedSessions(workspace)
+			const action = await this.openSessionManager(scoped)
+
+			if (action.kind === "close") return
+			// A run may have started while the manager was open; refuse rather
+			// than race it. Management follows the same busy contract as /compact.
+			if (this.sessionBusy()) {
+				this.notifySessionBusy()
+				return
+			}
+
+			switch (action.kind) {
+				case "switch": {
+					if (action.id === this.session.id) return
+					const next = await this.loadScopedSession(scoped, action.id)
+					if (next === null) {
+						this.chat.addChild(errorNotice("that session is no longer available"))
+						this.tui.requestRender()
+						continue
+					}
+					this.setActiveSession(next)
+					this.chat.addChild(notice(`switched to session ${next.id.slice(0, 8)}`))
+					return
+				}
+				case "rename": {
+					const target = await this.loadScopedSession(scoped, action.id)
+					if (target === null) {
+						this.chat.addChild(errorNotice("that session is no longer available"))
+						this.tui.requestRender()
+						continue
+					}
+					const input = await this.commandContext.ask("Rename session", { initialValue: target.title ?? "" })
+					if (input === null) continue
+					const title = input.trim()
+					if (title.length === 0) {
+						this.chat.addChild(errorNotice("session title cannot be empty"))
+						this.tui.requestRender()
+						continue
+					}
+					try {
+						await target.setTitle(title)
+						this.chat.addChild(notice(`session renamed: ${title}`))
+					} catch (error) {
+						this.chat.addChild(errorNotice(`rename failed: ${error instanceof Error ? error.message : String(error)}`))
+					}
+					this.tui.requestRender()
+					continue
+				}
+				case "delete": {
+					if (action.id === this.session.id) {
+						this.chat.addChild(errorNotice("cannot delete the current session"))
+						this.tui.requestRender()
+						continue
+					}
+					// The boundary holds at the operation site, not just in the
+					// component: only an id from the scoped set may be deleted.
+					if (!scoped.some(session => session.id === action.id)) {
+						this.chat.addChild(errorNotice("that session is no longer available"))
+						this.tui.requestRender()
+						continue
+					}
+					try {
+						await this.options.agent.deleteSession(action.id)
+					} catch (error) {
+						this.chat.addChild(errorNotice(`delete failed: ${error instanceof Error ? error.message : String(error)}`))
+						this.tui.requestRender()
+						continue
+					}
+					// `SessionStore.delete` swallows errors, so a normal return is
+					// not proof. Re-enumerate and treat a surviving id as failure.
+					const remaining = await this.scopedSessions(workspace)
+					if (remaining.some(session => session.id === action.id)) {
+						this.chat.addChild(errorNotice("delete failed: the session is still present"))
+						this.tui.requestRender()
+						continue
+					}
+					this.chat.addChild(notice("session deleted"))
+					this.tui.requestRender()
+					continue
+				}
+				case "fork": {
+					const parent = await this.loadScopedSession(scoped, action.id)
+					if (parent === null) {
+						this.chat.addChild(errorNotice("that session is no longer available"))
+						this.tui.requestRender()
+						continue
+					}
+					const candidates = forkCandidates(parent)
+					if (candidates.length === 0) {
+						this.chat.addChild(notice("nothing to fork yet"))
+						this.tui.requestRender()
+						continue
+					}
+					const chosen = await this.commandContext.pick(
+						"Fork from message",
+						candidates.map(candidate => ({
+							value: String(candidate.index),
+							label: candidate.label,
+							description: candidate.description,
+						})),
+					)
+					if (chosen === null) continue
+					const cut = Number(chosen) + 1
+					try {
+						const forked = await forkSession(this.options.agent, parent, cut)
+						this.setActiveSession(forked)
+						this.chat.addChild(notice(`forked session ${forked.id.slice(0, 8)} from message #${cut}`))
+					} catch (error) {
+						this.chat.addChild(errorNotice(`fork failed: ${error instanceof Error ? error.message : String(error)}`))
+						this.tui.requestRender()
+						continue
+					}
+					return
+				}
+				case "clone": {
+					const source = await this.loadScopedSession(scoped, action.id)
+					if (source === null) {
+						this.chat.addChild(errorNotice("that session is no longer available"))
+						this.tui.requestRender()
+						continue
+					}
+					try {
+						const clone = await cloneSession(this.options.agent, source)
+						this.setActiveSession(clone)
+						this.chat.addChild(notice(`cloned into session ${clone.id.slice(0, 8)}`))
+					} catch (error) {
+						this.chat.addChild(errorNotice(`clone failed: ${error instanceof Error ? error.message : String(error)}`))
+						this.tui.requestRender()
+						continue
+					}
+					return
+				}
+			}
+		}
 	}
 
 	// ── session replay ───────────────────────────────────────────────
