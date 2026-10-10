@@ -10,6 +10,9 @@ import { loadSettings } from "./config/settings"
 import { formatProjectInstructions, loadProjectContext } from "./config/context"
 import { loadResources } from "./config/resources"
 import { configDir } from "./config/dir"
+import { CheckpointStore, RewindRecorder } from "./session/checkpoint"
+import { summarizeMessages } from "./context/compaction"
+import type { ModelMessage } from "@minicode/model"
 
 export interface MiniCodeOptions {
   /** Session storage directory. Defaults to `~/.minicode/sessions` — sessions
@@ -30,11 +33,17 @@ export interface MiniCodeOptions {
  */
 export class MiniCode {
   readonly store: SessionStore
+  /** Where sessions live; file checkpoints are stored alongside them. */
+  readonly sessionsDir: string
+  /** Records file state around agent edits, for `/rewind`. */
+  readonly recorder: RewindRecorder
   private readonly modelOverride: Model | undefined
   private readonly sessions = new Map<string, Session>()
 
   constructor(options: MiniCodeOptions = {}) {
-    this.store = new SessionStore(options.sessionsDir ?? defaultSessionsDir())
+    this.sessionsDir = options.sessionsDir ?? defaultSessionsDir()
+    this.store = new SessionStore(this.sessionsDir)
+    this.recorder = new RewindRecorder(new CheckpointStore(this.sessionsDir))
     this.modelOverride = options.model
   }
 
@@ -61,6 +70,15 @@ export class MiniCode {
    * resolved live (the injected override, else the configured active model)
    * so configuration changes apply to the next run without restarting.
    */
+  /**
+   * Summarizes a range of history with the active model, for `/rewind`.
+   * Ephemeral: the caller decides what to do with the text.
+   */
+  async summarize(messages: readonly ModelMessage[]): Promise<string> {
+    const model = this.modelOverride ?? await this.resolveModel()
+    return summarizeMessages(model, messages, model.limits.contextWindow)
+  }
+
   async run(
     session: Session,
     task: string,
@@ -90,6 +108,7 @@ export class MiniCode {
       skills: resources.skills,
       autoCompact: settings.settings.autoCompact,
       onEvent: opts.onEvent,
+      recorder: this.recorder,
     })
   }
 

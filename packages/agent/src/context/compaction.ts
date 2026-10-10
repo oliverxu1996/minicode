@@ -53,6 +53,39 @@ export type CompactionOutcome =
  * defines every other budget: recovery must not be able to fail for the same
  * reason that triggered it.
  */
+/**
+ * Summarizes a caller-supplied set of messages with `SUMMARY_PROMPT`.
+ *
+ * Shares the prompt and the shape the automatic compactor uses, so a
+ * `/rewind` summary is indistinguishable downstream from a compaction
+ * summary. `//rewind` chooses the range; this only produces the text.
+ */
+export async function summarizeMessages(
+  model: Model,
+  messages: readonly ModelMessage[],
+  contextWindow?: number,
+): Promise<string> {
+  if (messages.length === 0) return ""
+  const budget = contextWindow === undefined
+    ? Number.POSITIVE_INFINITY
+    : contextBudget({ contextWindow, maxOutputTokens: contextWindow }).inputBudget
+  // Drop the oldest until the request fits, and say so, so the model is never
+  // handed a partial history presented as complete.
+  let start = 0
+  const cost = (from: number): number =>
+    estimateTokens([...messages.slice(from), { role: "user", content: SUMMARY_PROMPT }])
+  while (start < messages.length - 1 && cost(start) > budget) start++
+  const elided = start > 0
+  const result = await model.generate({
+    messages: [
+      ...messages.slice(start),
+      { role: "user", content: elided ? `${SUMMARY_PROMPT}\n\n${ELISION_NOTICE}` : SUMMARY_PROMPT },
+    ] as ModelMessage[],
+    temperature: 0,
+  })
+  return result.content ?? ""
+}
+
 export class Compactor {
   constructor(
     private readonly model: Model,

@@ -1,5 +1,5 @@
 import type { ModelMessage } from "@minicode/model"
-import type { ModelIdentity, RunSummary, SessionMessage } from "./types"
+import type { ModelIdentity, RewindNote, RunSummary, SessionMessage } from "./types"
 
 /**
  * The durable-format boundary for a session snapshot.
@@ -24,6 +24,10 @@ export function parseMessages(input: unknown): SessionMessage[] {
     const msg = raw as Partial<SessionMessage>
     if (typeof msg !== "object" || msg === null) continue
     if (msg.role !== "user" && msg.role !== "assistant" && msg.role !== "tool") continue
+    // A turn id that is not a string is not an identity. Dropping it leaves the
+    // message loadable and its checkpoints provably unusable, which is the
+    // safe direction; keeping a malformed value would let it match something.
+    if (typeof (msg as { turnId?: unknown }).turnId !== "string") delete (msg as { turnId?: unknown }).turnId
     out.push({
       ...msg,
       id: typeof msg.id === "string" ? msg.id : crypto.randomUUID(),
@@ -48,6 +52,21 @@ export function parseRuns(input: unknown): RunSummary[] {
     out.push(raw as RunSummary)
   }
   return out
+}
+
+/**
+ * Parses the persisted rewind note.
+ *
+ * Anything malformed loads as `null` rather than failing the session: a
+ * missing warning is a smaller failure than an unloadable session, and the
+ * note is never load-bearing for the transcript itself.
+ */
+export function parseRewindNote(input: unknown): RewindNote | null {
+  if (typeof input !== "object" || input === null) return null
+  const note = input as Partial<RewindNote>
+  const values = [note.shellTurns, note.shellCommands, note.at]
+  if (!values.every(value => typeof value === "number" && Number.isFinite(value))) return null
+  return { shellTurns: note.shellTurns!, shellCommands: note.shellCommands!, at: note.at! }
 }
 
 /**

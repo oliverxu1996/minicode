@@ -36,6 +36,19 @@ export interface BaseMessage {
 export interface UserMessage extends BaseMessage {
   readonly role: "user"
   readonly content: string
+  /**
+   * The turn this message began, minted once at run start and carried through
+   * every history rewrite.
+   *
+   * Agent-local and durable: it is the identity `/rewind` checkpoints are
+   * keyed by, so it must survive `replaceMessages` (which regenerates ids),
+   * and it is *not* model-facing — `toRequestMessages` builds its projection
+   * from an explicit field list, so this never reaches a provider.
+   *
+   * Absent on user messages that are not turn starts: a steer note, a summary,
+   * an imported transcript. Absence means "not a turn", never "unknown turn".
+   */
+  readonly turnId?: string
 }
 
 export interface AssistantMessage extends BaseMessage {
@@ -135,6 +148,23 @@ export interface RunSummary {
   readonly pruning?: PruneStats
   /** Present only when the run ended in an error. */
   readonly error?: string
+}
+
+/**
+ * What this session's rewinds discarded that cannot be undone.
+ *
+ * Shell commands are not reversible by rewinding, and nothing the session does
+ * afterwards changes that, so the counts only ever grow: a later rewind that
+ * discarded no shell turns must not clear a warning that is still true.
+ * Absent means no rewind has discarded a turn yet.
+ */
+export interface RewindNote {
+  /** Shell-invoking turns discarded across every rewind in this session. */
+  readonly shellTurns: number
+  /** Shell invocations those turns made. */
+  readonly shellCommands: number
+  /** When the note last changed. */
+  readonly at: number
 }
 
 /** Why a run ended. `stop` is the model's own final answer; the rest are

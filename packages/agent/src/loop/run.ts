@@ -11,6 +11,7 @@ import { CODING_TOOLS } from "../tools"
 import { createSkillTool } from "../tools/skill"
 import type { Tool } from "../tools/types"
 import { AgentLoop } from "./loop"
+import type { RewindRecorder } from "../session/checkpoint"
 
 /** Everything a single autonomous run needs. The model is injected, which
  *  is the test seam: production resolves it via `@minicode/model`
@@ -33,6 +34,8 @@ export interface RunDeps {
   /** Toolset override; defaults to the fixed coding toolset. */
   tools?: ReadonlyMap<string, Tool>
   onEvent?: (event: RunEvent) => void
+  /** Records file checkpoints for `/rewind`; absent disables checkpointing. */
+  recorder?: RewindRecorder
 }
 
 /**
@@ -124,6 +127,10 @@ export async function runTask(deps: RunDeps): Promise<RunResult> {
       iterations: 0,
       error: err instanceof Error ? err.message : String(err),
     }
+  } finally {
+    // Close the turn however it ended: an interrupted or failed run still
+    // changed files, and those changes must remain rewindable.
+    await deps.recorder?.endTurn(session.id, session.cwd)
   }
 
   // Terminal transitions are session-owned: an aborted run leaves

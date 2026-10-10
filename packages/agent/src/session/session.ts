@@ -1,7 +1,7 @@
 import type { ModelAssistantPart, ModelMessage, ModelToolResult, ModelUsage } from "@minicode/model"
-import type { ModelIdentity, RunFinishReason, RunSummary, SessionMessage, SessionStatus } from "./types"
+import type { ModelIdentity, RewindNote, RunFinishReason, RunSummary, SessionMessage, SessionStatus } from "./types"
 import { ToolLedger } from "./ledger"
-import { parseMessages, parseRuns, validateReplacementHistory } from "./serialization"
+import { parseMessages, parseRewindNote, parseRuns, validateReplacementHistory } from "./serialization"
 import { pruneOldToolOutputs } from "../context/projection"
 import type { PruneContext, PruneStats, ProjectionMessage } from "../context/projection"
 import type { ToolAffordances } from "../tools/types"
@@ -106,6 +106,13 @@ export class Session {
   title: string | null = null
   /** Set when this session was forked/cloned from another session. */
   parentSessionId: string | null = null
+  /**
+   * Shell activity this session's rewinds discarded and did not undo.
+   *
+   * Persisted with the session so the warning survives a reload — the shell's
+   * effects do. Owned by `recordRewind`, which only ever adds to it.
+   */
+  rewind: RewindNote | null = null
 
   private readonly _ledger = new ToolLedger()
   get ledger(): ToolLedger {
@@ -156,6 +163,7 @@ export class Session {
     if (typeof json.parentSessionId === "string") session.parentSessionId = json.parentSessionId
     session._messages.push(...parseMessages(json.messages))
     session._runs.push(...parseRuns(json.runs))
+    session.rewind = parseRewindNote(json.rewind)
     session.ledger.replaceAll(ToolLedger.fromJSON(json.ledger as never))
 
     // A persisted 'running' status in a fresh process is always a crash
@@ -177,6 +185,7 @@ export class Session {
       updatedAt: this.updatedAt,
       title: this.title,
       parentSessionId: this.parentSessionId,
+      rewind: this.rewind,
       runs: this._runs,
       ledger: this.ledger.toJSON(),
       messages: this._messages,
@@ -281,11 +290,21 @@ export class Session {
 
   // ── message lifecycle ─────────────────────────────────────────────
 
-  pushUser(text: string): SessionMessage & { role: "user" } {
+  /**
+   * Appends a user message.
+   *
+   * `turnId` is supplied only by the run loop, which mints it once and gives
+   * the same value to the rewind recorder, so a checkpoint and the message it
+   * describes can never disagree. Everything else that appends a user message
+   * — a steer note, a summary, an imported transcript — is not a turn start
+   * and deliberately carries no identity.
+   */
+  pushUser(text: string, turnId?: string): SessionMessage & { role: "user" } {
     const msg: SessionMessage = {
       id: crypto.randomUUID(),
       role: "user",
       content: text,
+      ...(turnId === undefined ? {} : { turnId }),
       status: "complete",
       timestamp: Date.now(),
     }
@@ -447,8 +466,13 @@ export class Session {
    * replacement throws and leaves the existing history and the on-disk snapshot
    * untouched. A valid replacement is swapped in atomically, then checkpointed.
    */
-  async replaceMessages(messages: readonly ModelMessage[]): Promise<void> {
+  async replaceMessages(messages: readonly (ModelMessage & { turnId?: string })[]): Promise<void> {
     validateReplacementHistory(messages)
+    // The spread carries whatever durable-only metadata the caller preserved —
+    // notably `turnId`, which identifies the turn a checkpoint belongs to and
+    // so must outlive the rewrite. Ids and timestamps are regenerated as
+    // before; a caller that drops `turnId` invalidates that turn's
+    // checkpoints, which is the safe direction.
     const next: SessionMessage[] = messages.map(message => ({
       id: crypto.randomUUID(),
       ...message,
@@ -457,6 +481,19 @@ export class Session {
     } as SessionMessage))
     this._messages = next
     await this.checkpoint()
+  }
+
+  /**
+   * Drops the interrupt/recovery latches.
+   *
+   * Used by `/rewind`: those latches describe history that has just been
+   * discarded, and leaving them set would make the next run report a recovery
+   * for a turn the user deliberately removed.
+   */
+  forgetInterruptedState(): void {
+    this._needsRecovery = false
+    this.pendingRecoveryNote = null
+    this.pendingSteer = null
   }
 
   /** Consume the pending recovery note (exactly the next model context). */

@@ -38,3 +38,6 @@ export {
 } from "./config/resources"
 export { IGNORED_WORKSPACE_ENTRIES } from "./workspace-ignored"
 export { CODING_TOOLS, type Tool, type ToolExecutionContext, type ToolResult } from "./tools"
+export { CheckpointStore, RewindRecorder, restoreFiles, resolveInWorkspace, readFileState, isShellTool, mutationTargets, checkpointsPath, type Checkpoint, type FileChange, type FileState, type RestoreOutcome } from "./session/checkpoint"
+export { rewindSession, summarizeRange, isLiveCheckpoint, liveCheckpoints, turnIndexOf, discardTurns, recordRewind, type CheckpointAdvance, type RewindScope, type RewindOutcome } from "./session/rewind"
+export type { RewindNote } from "./session/types"

@@ -40,6 +40,12 @@ export interface CommandContext {
   manageSessions(): Promise<void>
   /** Runs the model-based context compaction immediately. */
   compact(): Promise<CompactResult>
+  /**
+   * Opens the `/rewind` flow: pick a checkpoint, pick an action, apply it.
+   * The application owns the interaction and the session mutation; this is the
+   * command's only hook into it.
+   */
+  rewind(): Promise<void>
   /** Submits a task through the normal run path (used by templates). */
   submitTask(text: string): Promise<void>
   /**
@@ -318,6 +324,13 @@ export const COMMANDS: Command[] = [
     description: "Manage sessions in this workspace",
     execute(ctx) {
       return ctx.manageSessions()
+    },
+  },
+  {
+    name: "rewind",
+    description: "Restore the conversation, files, or both to an earlier prompt",
+    async execute(ctx) {
+      await ctx.rewind()
     },
   },
   {

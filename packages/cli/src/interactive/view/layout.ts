@@ -12,6 +12,11 @@ export interface TuiLayoutParts {
 	header: Component
 	chat: Component
 	status: Component
+	/**
+	 * Persistent session warning (see `/rewind`); it holds its row until the
+	 * condition it reports changes, and renders zero rows when there is none.
+	 */
+	warning: Component
 	/** Bottom-attached transient picker; renders zero rows when closed. */
 	picker: Component
 	editor: Component
@@ -48,6 +53,7 @@ export function fixedChromeRows(components: readonly Component[], width: number)
  * │   ├── Header
  * │   └── Conversation
  * ├── Status               shrink: 0
+ * ├── Warning              shrink: 0   ← persistent, zero rows when clear
  * ├── Picker               shrink: 0   ← transient, zero rows when closed
  * ├── Composer             shrink: 0
  * ├── Footer row 1         shrink: 0
@@ -73,6 +79,7 @@ export function buildTuiLayout(parts: TuiLayoutParts): TuiLayout {
 	const root = new VStack([
 		{ component: scroll, grow: 1, shrink: 1 },
 		{ component: parts.status, shrink: 0 },
+		{ component: parts.warning, shrink: 0 },
 		{ component: parts.picker, shrink: 0 },
 		{ component: parts.editor, shrink: 0 },
 		{ component: parts.footerRow1, shrink: 0 },

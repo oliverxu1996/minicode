@@ -6,13 +6,16 @@ import {
 	Text,
 	TuiAltScreen,
 	ProcessTerminal,
+	type Terminal,
 	matchesKey,
 	type Component,
 } from "@minicode/tui"
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
-import type { ModelLimits } from "@minicode/model"
-import type { MiniCode, RunEvent, Session, SessionMessage } from "@minicode/agent"
+import type { ModelLimits, ModelMessage } from "@minicode/model"
+import type { Checkpoint, MiniCode, RewindNote, RunEvent, Session, SessionMessage } from "@minicode/agent"
+import { CheckpointStore } from "@minicode/agent"
+import { discardTurns, liveCheckpoints, recordRewind, rewindSession, summarizeRange, turnIndexOf, type CheckpointAdvance } from "@minicode/agent"
 import { configDir, listPromptTemplates, loadSettings } from "@minicode/agent"
 import { ansi, markdownTheme } from "./view/theme"
 import {
@@ -50,6 +53,11 @@ export interface MiniCodeTuiOptions {
 	session: Session
 	/** Window title / header label (typically the workspace path). */
 	label?: string
+	/**
+	 * Terminal to render onto. Defaults to the process terminal; tests supply a
+	 * mock so the real application can be driven without a PTY.
+	 */
+	terminal?: Terminal
 }
 
 /**
@@ -122,10 +130,98 @@ interface AskState {
  * Ctrl-O toggles tool output; Ctrl-P cycles models; PageUp/PageDown/Home/End and
  * the mouse wheel scroll the conversation.
  */
+/** A one-line rendering of a restore outcome, spelling out every refusal. */
+function describeFiles(outcome: { restored: readonly string[]; removed: readonly string[]; failed: readonly { path: string; reason: string }[]; skipped: readonly { path: string; reason: string }[] } | null): string {
+	if (outcome === null) return "files unchanged"
+	const parts: string[] = []
+	if (outcome.restored.length > 0) parts.push(`restored ${outcome.restored.length} file(s)`)
+	if (outcome.removed.length > 0) parts.push(`removed ${outcome.removed.length} file(s) the agent created`)
+	if (outcome.skipped.length > 0) parts.push(`skipped ${outcome.skipped.length}: ${outcome.skipped.map(f => `${f.path} (${f.reason})`).join(", ")}`)
+	if (outcome.failed.length > 0) parts.push(`could not restore ${outcome.failed.length}: ${outcome.failed.map(f => `${f.path} (${f.reason})`).join(", ")}`)
+	// A turn that touched no file has nothing to restore and nothing to
+	// disclaim: the tracking note belongs with a result it qualifies, not on
+	// its own where it reads as an unexplained caveat.
+	if (parts.length === 0) return "files unchanged"
+	parts.push("note: only files the agent edited through its own tools are tracked; shell commands are not")
+	return parts.join(" · ")
+}
+
+/** `3 messages`, `1 message` — the codebase's plural convention. */
+function plural(count: number, one: string, many: string): string {
+	return `${count} ${count === 1 ? one : many}`
+}
+
+/**
+ * The session's standing warning, in one line.
+ *
+ * It states what is known — commands ran and were not reversed — and never
+ * what they did, which nothing here can determine.
+ */
+function shellWarningText(note: RewindNote): string {
+	const commands = plural(note.shellCommands, "shell command", "shell commands")
+	const turns = plural(note.shellTurns, "rewound turn", "rewound turns")
+	return `⚠ ${commands} in ${turns} not undone — effects may extend beyond this workspace`
+}
+
+/**
+ * What a rewind's discarded turns ran that it cannot undo.
+ *
+ * Printed in the transcript beside the file results, so the three distinct
+ * facts — conversation, tracked files, shell — are each stated once.
+ */
+function describeShell(discarded: readonly Checkpoint[]): string {
+	const shellTurns = discarded.filter(c => (c.shell ?? 0) > 0)
+	const commands = shellTurns.reduce((total, c) => total + (c.shell ?? 0), 0)
+	if (shellTurns.length === 0) {
+		// An unrecorded count is not a zero: a turn whose invocations were never
+		// recorded cannot be reported as having run none.
+		return discarded.some(c => c.shell === undefined)
+			? "shell: not recorded for these turns — whether a command ran, and what it did, is unknown"
+			: "shell: none invoked by the discarded turns"
+	}
+	return `shell: NOT reversed — ${plural(commands, "command", "commands")} ran in ${plural(shellTurns.length, "discarded turn", "discarded turns")}; they may have written files, left processes running, or changed state outside this workspace`
+}
+
+/**
+ * The footer's run figures for a session with no run live in this process.
+ *
+ * The last run's record is read back from disk so a reloaded or switched-to
+ * session describes its own history instead of claiming nothing ever ran. The
+ * context reading is deliberately absent: it is never persisted, and no figure
+ * is reconstructed from retained messages, which cannot reproduce what a
+ * provider actually billed.
+ */
+function seededDisplay(session: Session): RunDisplay {
+	const lastRun = session.runs.at(-1)
+	if (lastRun === undefined) return NO_RUN_DISPLAY
+	return {
+		lastCallUsage: undefined,
+		runUsage: lastRun.usage,
+		runRequests: lastRun.modelCalls ?? 0,
+		lastRun,
+		compactedMessages: undefined,
+	}
+}
+
+/** A checkpoint's prompt, short enough for a selector row. */
+function truncateForRow(text: string): string {
+	const flat = text.replace(/\s+/g, " ").trim()
+	return flat.length <= 72 ? flat : `${flat.slice(0, 71)}…`
+}
+
 export class MiniCodeTui {
 	private readonly tui: TuiAltScreen
 	private readonly chat = new Container()
+	/** File checkpoints for `/rewind`, stored beside the session. */
+	private readonly checkpointStore: CheckpointStore
 	private readonly status = new Container()
+	/**
+	 * The persistent session warning row, above the picker. It renders zero
+	 * rows while the session has nothing to warn about, and holds its row for
+	 * as long as it does — the state it reports outlives the message that
+	 * announced it.
+	 */
+	private readonly warning = new Container()
 	private readonly editor: Editor
 	private readonly footerRow1 = new FooterLineView()
 	private readonly footerRow2 = new FooterLineView()
@@ -143,6 +239,13 @@ export class MiniCodeTui {
 	private compacting = false
 	/** Runtime facts the footer reads, folded from the run's own events. */
 	private display: RunDisplay = NO_RUN_DISPLAY
+	/**
+	 * The context reading was dropped by a rewind rather than never taken.
+	 * Both leave the number unknown; only this says which.
+	 */
+	private contextCleared = false
+	/** The displayed run's turns are no longer all in the conversation. */
+	private runBeforeRewind = false
 	private abort: AbortController | null = null
 	private lastCtrlC = 0
 	private toolsExpanded = false
@@ -161,9 +264,10 @@ export class MiniCodeTui {
 	private readonly commandContext: CommandContext
 
 	constructor(private readonly options: MiniCodeTuiOptions) {
+		this.checkpointStore = new CheckpointStore(options.agent.sessionsDir)
 		// A fullscreen viewport owns the screen: the conversation scrolls in-app
 		// while the composer/status/footer stay pinned to the bottom.
-		this.tui = new TuiAltScreen(new ProcessTerminal(), false, undefined, { mouse: true })
+		this.tui = new TuiAltScreen(options.terminal ?? new ProcessTerminal(), false, undefined, { mouse: true })
 		this.session = options.session
 
 		// The header is the transcript's true empty state: the hello banner is
@@ -195,6 +299,7 @@ export class MiniCodeTui {
 			header,
 			chat: this.chat,
 			status: this.status,
+			warning: this.warning,
 			picker: this.picker,
 			editor: this.editor,
 			footerRow1: this.footerRow1,
@@ -207,6 +312,11 @@ export class MiniCodeTui {
 
 		this.commandContext = this.buildCommandContext()
 		this.replaySession()
+		this.updateWarning()
+		// The footer describes the session that is open, including the runs it
+		// recorded in an earlier process; nothing here is invented to fill a
+		// gap the persisted record does not cover.
+		this.display = seededDisplay(this.session)
 		void this.refreshFooterData()
 		this.updateFooter()
 	}
@@ -220,7 +330,7 @@ export class MiniCodeTui {
 	 */
 	private transcriptViewportHeight(): number {
 		const chromeRows = fixedChromeRows(
-			[this.status, this.picker, this.editor, this.footerRow1, this.footerRow2],
+			[this.status, this.warning, this.picker, this.editor, this.footerRow1, this.footerRow2],
 			this.tui.terminal.columns,
 		)
 		return Math.max(0, this.tui.terminal.rows - chromeRows)
@@ -291,6 +401,9 @@ export class MiniCodeTui {
 			manageSessions: async (): Promise<void> => {
 				await this.runSessionManager()
 			},
+			rewind: async (): Promise<void> => {
+				await this.runRewind()
+			},
 			compact: async (): Promise<CompactResult> => {
 				// A manual compaction must not run concurrently with another
 				// compaction or an active run: both mutate the same durable history,
@@ -349,9 +462,16 @@ export class MiniCodeTui {
 		this.chat.clear()
 		this.pendingTools.clear()
 		this.replaySession()
+		// Every session-owned reading is replaced, not carried over: another
+		// session's run figures and warnings describe another conversation.
+		this.display = seededDisplay(session)
+		this.contextCleared = false
+		this.runBeforeRewind = false
+		this.updateWarning()
 		// A switched/forked session may live in another workspace, so the
 		// footer's branch (and model) are re-read, not carried over.
 		void this.refreshFooterData()
+		this.updateFooter()
 		this.tui.requestRender()
 	}
 
@@ -540,6 +660,10 @@ export class MiniCodeTui {
 	private async startRun(text: string): Promise<void> {
 		this.running = true
 		this.display = NO_RUN_DISPLAY
+		// The new run measures its own context and produces its own figures, so
+		// the previous reading's provenance stops being reported.
+		this.contextCleared = false
+		this.runBeforeRewind = false
 		this.abort = new AbortController()
 		// The model is resolved per run, so the footer's budget is refreshed
 		// here: a switch made by /model or Ctrl-P must not leave it stale.
@@ -715,10 +839,26 @@ export class MiniCodeTui {
 			runUsage: this.display.runUsage,
 			lastRun: this.display.lastRun,
 			compactedMessages: this.display.compactedMessages,
+			contextCleared: this.contextCleared,
+			runBeforeRewind: this.runBeforeRewind,
 		})
 		this.footerRow1.setRow(lines.row1)
 		this.footerRow2.setRow(lines.row2)
 		this.tui.requestRender()
+	}
+
+	/**
+	 * Re-renders the persistent warning row from the session's own state.
+	 *
+	 * Read from the session rather than from a flag set at rewind time, so a
+	 * switch, a reload and a rewind all render the same fact the same way.
+	 */
+	private updateWarning(): void {
+		this.warning.clear()
+		const note = this.session.rewind
+		if (note !== null && note.shellTurns > 0) {
+			this.warning.addChild(new Text(`  ${ansi.yellow(shellWarningText(note))}`, 1, 0))
+		}
 	}
 
 	private async refreshFooterData(): Promise<void> {
@@ -824,6 +964,202 @@ export class MiniCodeTui {
 	 * session mutations and switches are guarded against an active run, both on
 	 * open and again before each operation.
 	 */
+	/**
+	 * `/rewind`: pick a checkpoint, pick an action, apply it.
+	 *
+	 * Nothing is restored by selecting a checkpoint — the action menu is a
+	 * second, explicit step, and every destructive action is confirmed. A run
+	 * in flight refuses the whole flow: rewinding history underneath a live run
+	 * would leave it describing turns that no longer exist.
+	 */
+	private async runRewind(): Promise<void> {
+		if (this.running) {
+			this.notifyRewindRefused("a run is in progress — press esc to interrupt it first")
+			return
+		}
+		if (this.compacting) {
+			this.notifyRewindRefused("a compaction is in progress — wait for it to finish")
+			return
+		}
+
+		const stored = await this.checkpointStore.load(this.session.id)
+		// An index is not an identity: a rewind frees indices that the next turn
+		// reuses, so a record is offered only while it still anchors to the turn
+		// it was opened for.
+		const usable = liveCheckpoints(stored, this.session.messages)
+		if (usable.length === 0) {
+			this.chat.addChild(notice(stored.length === 0
+				? "nothing to rewind to yet — checkpoints are created per prompt"
+				: "nothing to rewind to — earlier checkpoints no longer match this conversation"))
+			this.tui.requestRender()
+			return
+		}
+
+		const chosen = await this.commandContext.pick(
+			"Rewind to",
+			[...usable].reverse().map(checkpoint => ({
+				value: checkpoint.id,
+				label: truncateForRow(checkpoint.prompt),
+				description: [
+					// A turn that touched no file shows no count: "0 files"
+					// names an absence as if it were a result, and most turns
+					// are ordinary conversation.
+					...(checkpoint.files.length > 0 ? [plural(checkpoint.files.length, "file", "files")] : []),
+					// Only a positive count is a fact; an absent one predates
+					// shell tracking and claims nothing either way.
+					...(checkpoint.shell !== undefined && checkpoint.shell > 0
+						? [plural(checkpoint.shell, "shell command", "shell commands")]
+						: []),
+					new Date(checkpoint.createdAt).toLocaleTimeString(),
+				].join(" · "),
+			})),
+		)
+		if (chosen === null) return
+		const checkpoint = usable.find((c: Checkpoint) => c.id === chosen)
+		if (checkpoint === undefined) return
+
+		const action = await this.commandContext.pick("Rewind action", [
+			{ value: "both", label: "Restore code and conversation", description: "undo the turn, files included" },
+			{ value: "conversation", label: "Restore conversation", description: "keep the files as they are" },
+			{ value: "code", label: "Restore code", description: "keep the conversation as it is" },
+			{ value: "summary-from", label: "Summarize from here", description: "replace this turn onward with a summary" },
+			{ value: "summary-up-to", label: "Summarize up to here", description: "replace everything before this turn" },
+			{ value: "cancel", label: "Cancel", description: "change nothing" },
+		])
+		if (action === null || action === "cancel") return
+
+		await this.applyRewind(checkpoint, action, stored)
+	}
+
+	/**
+	 * Records that history changed underneath the footer's readings.
+	 *
+	 * The context gauge describes how full the *current* context is, and that
+	 * reading was taken before the rewrite, so it is dropped rather than
+	 * presented as current. Clearing only the reading — not `runRequests`,
+	 * `runUsage` or `lastRun` — leaves the session's genuine execution history
+	 * intact; the gauge returns with the next real measurement, and the run
+	 * figures are relabelled rather than adjusted.
+	 */
+	private forgetStaleAfterRewrite(historyChanged: boolean): void {
+		// A rewrite that changed nothing leaves the reading exactly as valid as
+		// it was: claiming it went stale would be its own small lie.
+		if (!historyChanged) return
+		this.display = { ...this.display, lastCallUsage: undefined }
+		this.contextCleared = true
+		this.runBeforeRewind = true
+	}
+
+	/**
+	 * Persists what a rewrite did to the checkpoint lineage, and what it
+	 * discarded that cannot be undone.
+	 *
+	 * The tombstone write and the session's warning are one commit: a warning
+	 * that outlived its tombstones (or the reverse) would describe a state that
+	 * never existed.
+	 */
+	private async commitAdvance(advance: CheckpointAdvance): Promise<string | null> {
+		// The conversation has already changed, so the in-memory record of it
+		// changes with it. Only persistence can fail from here.
+		recordRewind(this.session, advance.discarded)
+		this.updateWarning()
+		try {
+			await this.checkpointStore.save(this.session.id, advance.next)
+			await this.session.checkpoint()
+			return null
+		} catch (err) {
+			// Reporting this as a failed rewind would be false — it happened.
+			return `the change was applied, but its checkpoint record could not be saved (${err instanceof Error ? err.message : String(err)}) — later rewinds may still offer these turns`
+		}
+	}
+
+	/** Applies one chosen rewind action and reports exactly what happened. */
+	private async applyRewind(checkpoint: Checkpoint, action: string, stored: readonly Checkpoint[]): Promise<void> {
+		try {
+			if (action === "code") {
+				// Files only: the conversation, and so every checkpoint and the
+				// session's warning, are exactly as they were.
+				const outcome = await rewindSession(this.session, checkpoint, "code")
+				this.chat.addChild(notice(describeFiles(outcome.files)))
+				this.tui.requestRender()
+				return
+			}
+
+			// Where this checkpoint's turn begins NOW. Derived from the turn's
+			// identity rather than the index stored with the checkpoint, which
+			// a compaction or an earlier rewind may have invalidated.
+			const boundary = turnIndexOf(this.session.messages, checkpoint.turnId)
+			if (boundary < 0) {
+				this.chat.addChild(errorNotice("rewind: that turn is no longer in this conversation"))
+				this.tui.requestRender()
+				return
+			}
+			// "Summarize up to here" replaces what is above the checkpoint;
+			// everything else cuts from the checkpoint down.
+			const from = action === "summary-up-to" ? 0 : boundary
+			const to = action === "summary-up-to" ? boundary : this.session.messages.length
+
+			if (action === "summary-from" || action === "summary-up-to") {
+				await this.summarizeHistory(from, to, stored)
+				return
+			}
+
+			const outcome = await rewindSession(this.session, checkpoint, action === "both" ? "both" : "conversation")
+			const advance = discardTurns(stored, outcome.removedTurnIds)
+			const unsaved = await this.commitAdvance(advance)
+			this.forgetStaleAfterRewrite(outcome.removedMessages > 0)
+			this.chat.clear()
+			this.pendingTools.clear()
+			this.replaySession()
+			// The three facts, each stated once: what happened to the
+			// conversation, to tracked files, and to everything a shell did.
+			// With no discarded turn there is no shell fact to state: a turn
+			// that ran a command always has a record now.
+			this.chat.addChild(notice(describeFiles(outcome.files)))
+			if (advance.discarded.length > 0) this.chat.addChild(notice(describeShell(advance.discarded)))
+			this.restorePrompt(checkpoint.prompt)
+			this.chat.addChild(notice(`rewound ${plural(outcome.removedMessages, "message", "messages")} — the prompt is back in the composer`))
+			if (unsaved !== null) this.chat.addChild(errorNotice(unsaved))
+			this.tui.requestRender()
+		} catch (err) {
+			this.chat.addChild(errorNotice(`rewind failed: ${err instanceof Error ? err.message : String(err)}`))
+			this.tui.requestRender()
+		}
+	}
+
+	/** Summarizes `[from, to)` and reports the result; the files are untouched. */
+	private async summarizeHistory(from: number, to: number, stored: readonly Checkpoint[]): Promise<void> {
+		const range = this.session.messages.slice(from, to)
+		const text = await this.options.agent.summarize(
+			range.map(m => ({ role: m.role, content: m.content }) as ModelMessage),
+		)
+		// `summarizeRange` re-checks the boundaries and refuses a range that
+		// would split a turn, so a bad selection cannot corrupt the history.
+		const outcome = await summarizeRange(this.session, from, to, async () => text)
+		// The rewrite reports the turns it removed; those, and only those, are
+		// what this operation discarded.
+		const advance = discardTurns(stored, outcome.removedTurnIds)
+		const unsaved = await this.commitAdvance(advance)
+		this.forgetStaleAfterRewrite(outcome.replaced > 0)
+		this.chat.clear()
+		this.pendingTools.clear()
+		this.replaySession()
+		if (advance.discarded.length > 0) this.chat.addChild(notice(describeShell(advance.discarded)))
+		this.chat.addChild(notice(`summarized ${plural(outcome.replaced, "message", "messages")}; files unchanged`))
+		if (unsaved !== null) this.chat.addChild(errorNotice(unsaved))
+		this.tui.requestRender()
+	}
+
+	private notifyRewindRefused(reason: string): void {
+		this.chat.addChild(errorNotice(`cannot rewind: ${reason}`))
+		this.tui.requestRender()
+	}
+
+	/** Puts a rewound prompt back in the composer so it can be edited and resent. */
+	private restorePrompt(prompt: string): void {
+		this.editor.setText(prompt)
+	}
+
 	private async runSessionManager(): Promise<void> {
 		if (this.sessionBusy()) {
 			this.notifySessionBusy()

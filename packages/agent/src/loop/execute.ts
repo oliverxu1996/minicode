@@ -39,6 +39,12 @@ export async function executeTool(
     reissue?: boolean
     signal?: AbortSignal
     onEvent?: (event: RunEvent) => void
+    /**
+     * Awaited immediately before the tool performs its side effect, so file
+     * checkpoints capture the state a tool is about to overwrite rather than
+     * reconstructing it from the call text afterwards.
+     */
+    onBeforeExecute?: (name: string, input: Record<string, unknown>) => Promise<void>
   } = { iteration: 0 },
 ): Promise<void> {
   const emit = opts.onEvent ?? (() => {})
@@ -73,6 +79,7 @@ export async function executeTool(
     output = { ok: false, error: `unknown tool ${name}` }
   } else {
     try {
+      await opts.onBeforeExecute?.(name, execInput)
       output = await tool.execute(execInput, {
         toolCallId,
         cwd: session.cwd,

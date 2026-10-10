@@ -103,6 +103,7 @@ export class TuiHarness {
 	readonly chat: GrowableLines
 	readonly picker: PickerSlot
 	readonly status: Component
+	readonly warning: Component
 	readonly footerRow1: Component
 	readonly footerRow2: Component
 	readonly submitted: string[] = []
@@ -112,6 +113,8 @@ export class TuiHarness {
 	private readonly writes: string[] = []
 	private send: ((data: string) => void) | undefined
 	private started = false
+	/** Settable so a test can measure the layout with the warning row present. */
+	private readonly warningLines: string[] = []
 
 	constructor(options: TuiHarnessOptions = {}) {
 		this.columnsValue = options.width ?? 80
@@ -154,6 +157,9 @@ export class TuiHarness {
 			options.statusRows && options.statusRows > 0
 				? new FixedLines(Array.from({ length: options.statusRows }, (_, i) => `STATUS-${i}`))
 				: new FixedLines([])
+		// Empty by default — the real warning row is present but renders zero
+		// rows, exactly as it does in a session with nothing to warn about.
+		this.warning = new FixedLines(this.warningLines)
 
 		this.editor = new Editor(this.tui, {
 			borderColor: text => text,
@@ -179,6 +185,7 @@ export class TuiHarness {
 			header,
 			chat: this.chat,
 			status: this.status,
+			warning: this.warning,
 			picker: this.picker,
 			editor: this.editor,
 			footerRow1: this.footerRow1,

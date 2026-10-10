@@ -10,6 +10,7 @@ import { ModelError } from "@minicode/model"
 import type { Skill } from "../config/resources"
 import { contextBudget } from "../context/budget"
 import type { PruneStats } from "../context/projection"
+import type { RewindRecorder } from "../session/checkpoint"
 import type { Session } from "../session/session"
 import type { RunEvent } from "./events"
 import { toModelTools, type Tool } from "../tools"
@@ -32,6 +33,8 @@ export interface LoopOptions {
   onEvent?: (event: RunEvent) => void
   /** Observability sink forwarded to request pruning. */
   onPrune?: (stats: PruneStats) => void
+  /** Records file checkpoints for `/rewind`; absent disables checkpointing. */
+  recorder?: RewindRecorder
 }
 
 const DEFAULT_MAX_ITERATIONS = 100
@@ -104,8 +107,18 @@ export class AgentLoop {
 
     if (signal?.aborted) return { aborted: true, finishReason: "aborted", iterations: 0 }
 
+    // A checkpoint boundary is exactly here: the turn's user message is about
+    // to be appended, so its index is the session's current length.
+    //
+    // The turn's identity is minted once and handed to both sides, so the
+    // checkpoint's turn and the message that begins it cannot disagree. It is
+    // also what lets the pairing survive a history rewrite, which the message
+    // id cannot: `replaceMessages` regenerates ids.
+    const turnId = crypto.randomUUID()
+    await opts.recorder?.beginTurn(this.session.id, task, this.session.messages.length, turnId)
+
     // The task is durable before anything can fail.
-    this.session.pushUser(task)
+    this.session.pushUser(task, turnId)
     await this.session.checkpoint()
 
     // Reconcile recoverable execution state before a model request. This is
@@ -371,6 +384,10 @@ export class AgentLoop {
           iteration: iterations,
           signal,
           onEvent: emit,
+          ...(opts.recorder === undefined ? {} : {
+            onBeforeExecute: (name: string, input: Record<string, unknown>) =>
+              opts.recorder!.beforeTool(this.session.id, this.session.cwd, name, input),
+          }),
         })
 
         const key = `${call.toolName}\u0000${JSON.stringify(call.input)}`

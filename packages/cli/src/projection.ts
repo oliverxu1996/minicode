@@ -174,6 +174,18 @@ export interface FooterInput {
   readonly lastRun: RunSummary | undefined
   /** Messages summarized by the most recent runtime compaction in this run. */
   readonly compactedMessages: number | undefined
+  /**
+   * The last call's reading was discarded by a rewind rather than never taken.
+   * The context number is unknown either way; this says which, so the dash is
+   * not read as "nothing has run".
+   */
+  readonly contextCleared?: boolean
+  /**
+   * The displayed run's figures cover turns a rewind has since removed. The
+   * numbers are genuine execution history and are never adjusted; the label
+   * says what they no longer describe.
+   */
+  readonly runBeforeRewind?: boolean
 }
 
 /** How a model call stands against the runtime's usable input budget. */
@@ -383,12 +395,15 @@ function footerRow2(input: FooterInput): FooterRow {
 
   if (input.limits !== undefined) {
     if (context === undefined) {
-      groups.push({
-        parts: [
-          { text: "Context", tone: "dim", drop: 0 },
-          { text: "—", tone: "dim", drop: 0 },
-        ],
-      })
+      const parts: FooterPart[] = [
+        { text: "Context", tone: "dim", drop: 0 },
+        { text: "—", tone: "dim", drop: 0 },
+      ]
+      // Unknown because a rewind discarded the reading, not because no call
+      // has finished: the number cannot be recovered from retained messages,
+      // and no figure is invented to fill the gap.
+      if (input.contextCleared === true) parts.push({ text: "unknown after rewind", tone: "dim", drop: 6 })
+      groups.push({ parts })
     } else {
       const tone: FooterTone = context.overBudget ? "alert" : context.atThreshold ? "warn" : "dim"
       const parts: FooterPart[] = [
@@ -427,7 +442,11 @@ function footerRow2(input: FooterInput): FooterRow {
     }
     if (runTokens !== undefined) groups.push({ parts: [{ text: runTokens, tone: "dim", drop: 4 }] })
   } else if (input.lastRun !== undefined) {
-    groups.push({ parts: [{ text: `last run ${lastRunText(input.lastRun)}`, tone: "dim", drop: 3 }] })
+    // "before rewind" qualifies the figures, never replaces them: the run
+    // really did make those calls, and erasing the record would be a lie in
+    // the other direction.
+    const label = input.runBeforeRewind === true ? "last run (before rewind)" : "last run"
+    groups.push({ parts: [{ text: `${label} ${lastRunText(input.lastRun)}`, tone: "dim", drop: 3 }] })
     if (input.runRequests > 0) {
       groups.push({ parts: [{ text: `${input.runRequests} req`, tone: "dim", drop: 5 }] })
     }
