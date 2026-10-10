@@ -8,7 +8,7 @@
  * memory".
  *
  * The command-driven lifecycle tests (/fork, /clone, /import) live with the
- * application in `@minicode/cli`; this file covers the runtime mechanisms:
+ * application in `@loongcode/cli`; this file covers the runtime mechanisms:
  * compaction durability and run recovery ordering.
  */
 import { describe, expect, test } from "bun:test"
@@ -17,7 +17,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Compactor } from "../../src/context/compaction"
 import { runTask } from "../../src/loop/run"
-import { MiniCode } from "../../src/minicode"
+import { LoongCode } from "../../src/loongcode"
 import { Session } from "../../src/session/session"
 import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
 import type { Tool } from "../../src/tools"
@@ -25,22 +25,22 @@ import type { Tool } from "../../src/tools"
 interface Fixture {
   readonly dir: string
   readonly sessionsDir: string
-  readonly agent: MiniCode
+  readonly agent: LoongCode
   /** A second runtime over the same store — "the process restarted". */
   reload(id: string): Promise<Session>
   cleanup(): void
 }
 
 function fixture(): Fixture {
-  const dir = mkdtempSync(join(tmpdir(), "minicode-lifecycle-"))
+  const dir = mkdtempSync(join(tmpdir(), "loongcode-lifecycle-"))
   const sessionsDir = join(dir, "sessions")
-  const agent = new MiniCode({ sessionsDir, model: new FakeModel([textResponse("ok")]) })
+  const agent = new LoongCode({ sessionsDir, model: new FakeModel([textResponse("ok")]) })
   return {
     dir,
     sessionsDir,
     agent,
     reload: async (id: string): Promise<Session> =>
-      await new MiniCode({ sessionsDir }).loadSession(id),
+      await new LoongCode({ sessionsDir }).loadSession(id),
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   }
 }

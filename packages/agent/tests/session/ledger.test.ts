@@ -15,7 +15,7 @@ function typeOnly(fn: () => void): void {
 }
 
 function sess(): Session {
-  const session = Session.create({ cwd: "/tmp/minicode-boundary-test" })
+  const session = Session.create({ cwd: "/tmp/loongcode-boundary-test" })
   session.onCheckpoint(async () => {})
   return session
 }

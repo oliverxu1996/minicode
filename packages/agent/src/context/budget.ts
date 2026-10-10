@@ -1,4 +1,4 @@
-import type { ModelLimits, ModelMessage } from "@minicode/model"
+import type { ModelLimits, ModelMessage } from "@loongcode/model"
 
 /** Token budgets derived from a model's limits. */
 export interface ContextBudget {
@@ -11,7 +11,7 @@ export interface ContextBudget {
 
 /**
  * Splits a model's context window into input and output budgets using the
- * fixed MiniCode policy: 75% of the context window is reserved for input and
+ * fixed LoongCode policy: 75% of the context window is reserved for input and
  * 25% for output, with the output budget additionally capped by the model's
  * own `maxOutputTokens`.
  *

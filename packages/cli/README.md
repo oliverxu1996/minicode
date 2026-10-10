@@ -1,4 +1,4 @@
-# MiniCode
+# LoongCode
 
 An opinionated coding agent that works directly in your repository. Give it a
 software task — fix a failing test, refactor a module, track down a bug — and
@@ -10,9 +10,9 @@ in an interactive terminal UI.
 [Bun](https://bun.sh) must be installed and available on PATH.
 
 ```sh
-npm install -g @minicode/cli
+npm install -g @loongcode/cli
 cd my-project
-minicode
+loongcode
 ```
 
 On first launch no model is configured — use `/model` to set one up
@@ -23,20 +23,20 @@ defaulted and only exposed under an optional *Configure limits…* step.
 ## Scripting
 
 ```sh
-minicode -p "run the tests and report failures"   # print mode
-minicode --mode json -p "find TODO comments"      # JSON event stream
-minicode -c -p "now fix what you found"           # continue last session
+loongcode -p "run the tests and report failures"   # print mode
+loongcode --mode json -p "find TODO comments"      # JSON event stream
+loongcode -c -p "now fix what you found"           # continue last session
 ```
 
 ## Project instructions
 
 `AGENTS.md` (or `CLAUDE.md`) in the repository root is loaded into the
-agent's system prompt. `.minicode/settings.json`, `.minicode/prompts/*.md`
-and `.minicode/skills/<name>/SKILL.md` add project settings, prompt
+agent's system prompt. `.loongcode/settings.json`, `.loongcode/prompts/*.md`
+and `.loongcode/skills/<name>/SKILL.md` add project settings, prompt
 templates, and skills (loaded automatically).
 
 Configuration and sessions live under your user config directory
-(`~/.minicode/`) — never inside
+(`~/.loongcode/`) — never inside
 this package.
 
 See the repository README for the full product documentation.

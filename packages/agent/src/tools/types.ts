@@ -58,7 +58,7 @@ export interface ToolExecutionContext {
  * A coding tool.
  *
  * `inputSchema` is a JSON Schema object handed to the model verbatim via
- * `@minicode/model`. Tools validate their own input defensively — a schema
+ * `@loongcode/model`. Tools validate their own input defensively — a schema
  * constraint violation by the model surfaces as an `ok: false` result, not
  * a thrown error.
  */

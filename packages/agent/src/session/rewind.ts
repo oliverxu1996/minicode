@@ -1,4 +1,4 @@
-import type { ModelMessage } from "@minicode/model"
+import type { ModelMessage } from "@loongcode/model"
 import { restoreFiles, type Checkpoint, type RestoreOutcome } from "./checkpoint"
 import { ToolLedger } from "./ledger"
 import type { Session } from "./session"
@@ -117,7 +117,7 @@ export function discardTurns(checkpoints: readonly Checkpoint[], turnIds: readon
  * Folds what a rewind discarded into the session's standing warning.
  *
  * The counts ACCUMULATE and are never replaced or cleared by a later rewind.
- * Shell effects are not undone by anything MiniCode does afterwards, so
+ * Shell effects are not undone by anything LoongCode does afterwards, so
  * resetting the note on a rewind that happened to discard no shell turns would
  * erase a warning that is still true — the one failure this feature exists to
  * prevent. `at` records when the note last changed.

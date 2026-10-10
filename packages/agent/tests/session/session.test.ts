@@ -13,9 +13,9 @@ import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { Model } from "@minicode/model"
+import type { Model } from "@loongcode/model"
 import { executeTool } from "../../src/loop/execute"
-import { MiniCode } from "../../src/minicode"
+import { LoongCode } from "../../src/loongcode"
 import { toolDurationMs } from "../../src/session/ledger"
 import { Session, UNKNOWN_OUTCOME_ERROR } from "../../src/session/session"
 import { SessionStore } from "../../src/session/store"
@@ -34,14 +34,14 @@ const RUN_MODEL: ModelIdentity = {
 }
 
 function tempDir(): { dir: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "minicode-session-test-"))
+  const dir = mkdtempSync(join(tmpdir(), "loongcode-session-test-"))
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
 interface Harness {
   /** The temp workspace root; sessions live at `join(dir, "sessions")`. */
   dir: string
-  agent: MiniCode
+  agent: LoongCode
   /** Simulates a crash-restart: persists the live session (the crash-time
    *  snapshot), then loads it through a fresh runtime root with an empty
    *  session cache. */
@@ -52,13 +52,13 @@ interface Harness {
 function harness(model?: Model): Harness {
   const { dir, cleanup } = tempDir()
   const sessionsDir = join(dir, "sessions")
-  const agent = new MiniCode({ sessionsDir, model })
+  const agent = new LoongCode({ sessionsDir, model })
   return {
     dir,
     agent,
     reloadAsNewProcess: async (session: Session) => {
       await session.checkpoint()
-      const fresh = new MiniCode({ sessionsDir, model })
+      const fresh = new LoongCode({ sessionsDir, model })
       return fresh.loadSession(session.id)
     },
     cleanup,
@@ -71,7 +71,7 @@ function typeOnly(fn: () => void): void {
 }
 
 function sess(): Session {
-  const session = Session.create({ cwd: "/tmp/minicode-boundary-test" })
+  const session = Session.create({ cwd: "/tmp/loongcode-boundary-test" })
   session.onCheckpoint(async () => {})
   return session
 }

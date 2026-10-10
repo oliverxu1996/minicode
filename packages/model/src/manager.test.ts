@@ -312,7 +312,7 @@ describe("ModelManager persistence", () => {
       manager.update(testConfig({ name: "Renamed" }))
 
       const { readdirSync } = await import("node:fs")
-      const dir = process.env.MINICODE_CONFIG_DIR!
+      const dir = process.env.LOONGCODE_CONFIG_DIR!
       expect(readdirSync(dir)).toEqual(["models.json"])
     })
   })
@@ -320,7 +320,7 @@ describe("ModelManager persistence", () => {
   test("a failed persist leaves the manager unchanged", async () => {
     await withConfigDir(async () => {
       const { chmodSync } = await import("node:fs")
-      const dir = process.env.MINICODE_CONFIG_DIR!
+      const dir = process.env.LOONGCODE_CONFIG_DIR!
       const manager = await ModelManager.load()
       manager.add(testConfig({ id: "a" }))
 

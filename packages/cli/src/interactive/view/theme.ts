@@ -1,7 +1,7 @@
-import type { MarkdownTheme } from "@minicode/tui"
+import type { MarkdownTheme } from "@loongcode/tui"
 
 /**
- * Minimal ANSI theme for the MiniCode TUI: a fixed set of transforms, no
+ * Minimal ANSI theme for the LoongCode TUI: a fixed set of transforms, no
  * color-scheme loading.
  */
 

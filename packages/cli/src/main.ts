@@ -1,17 +1,17 @@
-import { MiniCode, migrateLegacyConfig } from "@minicode/agent"
-import { MINICODE_VERSION } from "./version"
-import { MiniCodeTui } from "./interactive/app"
+import { LoongCode } from "@loongcode/agent"
+import { LOONGCODE_VERSION } from "./version"
+import { LoongCodeTui } from "./interactive/app"
 import { runPrint } from "./print"
 
 /**
- * MiniCode entry point.
+ * LoongCode entry point.
  *
  * ```txt
  * bun packages/cli/src/main.ts [options] [workspace-directory]
  * ```
  *
  * The same entry point backs every distribution: running from a checkout, the
- * npm package's bundled `minicode` binary, and the standalone release build.
+ * npm package's bundled `loongcode` binary, and the standalone release build.
  * Nothing about the CLI differs between them.
  *
  * Options:
@@ -24,7 +24,7 @@ import { runPrint } from "./print"
  *   --help, -h           Print usage
  *
  * The workspace directory defaults to the current directory. Model
- * configuration comes from `@minicode/model` ModelManager (the configured
+ * configuration comes from `@loongcode/model` ModelManager (the configured
  * active model) — or use /model inside the TUI on first run.
  *
  * Interactive mode needs a terminal, so it is refused when stdin is not a TTY
@@ -75,7 +75,7 @@ function parseArgs(argv: string[]): CliArgs {
   return args
 }
 
-async function resolveSession(agent: MiniCode, args: CliArgs): Promise<{ session: ReturnType<MiniCode["createSession"]> | null; label: string }> {
+async function resolveSession(agent: LoongCode, args: CliArgs): Promise<{ session: ReturnType<LoongCode["createSession"]> | null; label: string }> {
   if (args.resumeId !== null) {
     return { session: await agent.loadSession(args.resumeId), label: args.resumeId }
   }
@@ -99,21 +99,21 @@ export interface CliIO {
 }
 
 export function helpText(): string {
-  return `MiniCode — standalone coding agent
+  return `LoongCode — standalone coding agent
 
-usage: minicode [options] [workspace]
+usage: loongcode [options] [workspace]
 
   -p, --print <task>   run one task and print the final response
       --mode json      with -p: emit RunEvents as JSON lines
   -c, --continue       continue the most recent session in the workspace
       --resume <id>    resume a specific session
       --cwd <dir>      workspace directory (default: current directory)
-  -v, --version        print the MiniCode version
+  -v, --version        print the LoongCode version
   -h, --help           show this help
 
 first run: use /model inside the TUI to configure a model
 (protocol, endpoint, model name, API key), or write
-~/.minicode/models.json directly.`
+~/.loongcode/models.json directly.`
 }
 
 /**
@@ -126,18 +126,16 @@ export async function runCli(argv: string[], io: CliIO): Promise<number | null> 
     return 0
   }
   if (argv.includes("--version") || argv.includes("-v")) {
-    io.stdout(MINICODE_VERSION + "\n")
+    io.stdout(LOONGCODE_VERSION + "\n")
     return 0
   }
 
-  // Carry over a pre-`~/.minicode` install once, before anything reads config.
-  migrateLegacyConfig()
 
   const args = parseArgs(argv)
 
   // ── non-interactive mode ─────────────────────────────────────────
   if (args.print !== null) {
-    const agent = new MiniCode()
+    const agent = new LoongCode()
     const { session } = await resolveSession(agent, args)
     const active = session ?? agent.createSession(args.cwd)
     return runPrint(agent, active, args.print, args.jsonMode, io)
@@ -149,16 +147,16 @@ export async function runCli(argv: string[], io: CliIO): Promise<number | null> 
   // pipe, so refuse before starting it rather than hang.
   if (!io.stdinIsTTY) {
     io.stderr(
-      `minicode: stdin is not a terminal, so the interactive UI cannot start.\n` +
-      `Run a single task instead:  minicode -p "<task>"\n`,
+      `loongcode: stdin is not a terminal, so the interactive UI cannot start.\n` +
+      `Run a single task instead:  loongcode -p "<task>"\n`,
     )
     return 1
   }
 
-  const agent = new MiniCode()
+  const agent = new LoongCode()
   const { session: resumed, label } = await resolveSession(agent, args)
   const session = resumed ?? agent.createSession(args.cwd)
-  const app = new MiniCodeTui({ agent, session, label })
+  const app = new LoongCodeTui({ agent, session, label })
   app.start()
   return null
 }

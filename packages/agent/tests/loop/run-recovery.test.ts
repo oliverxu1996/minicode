@@ -12,9 +12,9 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ModelMessage } from "@minicode/model"
+import type { ModelMessage } from "@loongcode/model"
 import { Compactor } from "../../src/context/compaction"
-import { MiniCode } from "../../src/minicode"
+import { LoongCode } from "../../src/loongcode"
 import { Session, UNKNOWN_OUTCOME_ERROR } from "../../src/session/session"
 import type { ModelIdentity } from "../../src/session/types"
 import { CODING_TOOLS } from "../../src/tools"
@@ -32,17 +32,17 @@ const MODEL: ModelIdentity = {
 interface Harness {
   dir: string
   sessionsDir: string
-  agent: MiniCode
+  agent: LoongCode
   cleanup: () => void
 }
 
 function harness(): Harness {
-  const dir = mkdtempSync(join(tmpdir(), "minicode-run-recovery-"))
+  const dir = mkdtempSync(join(tmpdir(), "loongcode-run-recovery-"))
   const sessionsDir = join(dir, "sessions")
   return {
     dir,
     sessionsDir,
-    agent: new MiniCode({ sessionsDir, model: new FakeModel([textResponse("ok")]) }),
+    agent: new LoongCode({ sessionsDir, model: new FakeModel([textResponse("ok")]) }),
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   }
 }
@@ -94,7 +94,7 @@ describe("C1 — recovery before model requests", () => {
       expect(session.needsRecovery()).toBe(false)
 
       const model = new FakeModel([textResponse("done")])
-      const agent = new MiniCode({ sessionsDir: h.sessionsDir, model })
+      const agent = new LoongCode({ sessionsDir: h.sessionsDir, model })
       const events: string[] = []
       await agent.run(session, "next", { onEvent: e => events.push(e.type) })
 
@@ -117,7 +117,7 @@ describe("C1 — recovery before model requests", () => {
         toolCallResponse([{ toolCallId: "c1", toolName: "bash", input: { command: "echo hi" } }]),
         textResponse("unused"),
       ])
-      const agent = new MiniCode({ sessionsDir, model: aborting })
+      const agent = new LoongCode({ sessionsDir, model: aborting })
       const session = agent.createSession(join(h.dir, "ws"))
 
       // Interrupt after the assistant tool-call turn is durably persisted but
@@ -132,14 +132,14 @@ describe("C1 — recovery before model requests", () => {
 
       // Path B: reload, then continue.
       const modelReload = new FakeModel([textResponse("reloaded")])
-      const agentReload = new MiniCode({ sessionsDir, model: modelReload })
+      const agentReload = new LoongCode({ sessionsDir, model: modelReload })
       const reloaded = await agentReload.loadSession(session.id)
       const eventsReload: string[] = []
       await agentReload.run(reloaded, "continue", { onEvent: e => eventsReload.push(e.type) })
 
       // Path A: continue in-process on the same object.
       const modelInProc = new FakeModel([textResponse("in-process")])
-      const agentInProc = new MiniCode({ sessionsDir, model: modelInProc })
+      const agentInProc = new LoongCode({ sessionsDir, model: modelInProc })
       const eventsInProc: string[] = []
       await agentInProc.run(session, "continue", { onEvent: e => eventsInProc.push(e.type) })
 
@@ -207,7 +207,7 @@ describe("C1 — recovery before model requests", () => {
     try {
       const session = h.agent.createSession(join(h.dir, "ws"))
       const model = new FakeModel([textResponse("done")])
-      const agent = new MiniCode({ sessionsDir: h.sessionsDir, model })
+      const agent = new LoongCode({ sessionsDir: h.sessionsDir, model })
       const events: string[] = []
       await agent.run(session, "hello", { onEvent: e => events.push(e.type) })
 
@@ -226,10 +226,10 @@ describe("C1 — recovery before model requests", () => {
         { role: "user", content: "task" },
         { role: "assistant", content: [{ type: "tool_call", toolCallId: "c1", toolName: "bash", input: {} }] },
       ])
-      const agent = new MiniCode({ sessionsDir: h.sessionsDir, model: new FakeModel([textResponse("done")]) })
+      const agent = new LoongCode({ sessionsDir: h.sessionsDir, model: new FakeModel([textResponse("done")]) })
       await agent.run(session, "next")
 
-      const reloaded = await new MiniCode({ sessionsDir: h.sessionsDir }).loadSession(session.id)
+      const reloaded = await new LoongCode({ sessionsDir: h.sessionsDir }).loadSession(session.id)
       expect(resultsFor(reloaded, "c1")).toHaveLength(1)
       expect(reloaded.ledger.get("c1")?.status).toBe("failed")
       expect(reloaded.needsRecovery()).toBe(false)
@@ -249,7 +249,7 @@ describe("C2 — run-start fault isolation", () => {
     try {
       const session = h.agent.createSession(join(h.dir, "ws"))
       const model = new FakeModel([textResponse("second run")])
-      const agent = new MiniCode({ sessionsDir: h.sessionsDir, model })
+      const agent = new LoongCode({ sessionsDir: h.sessionsDir, model })
       const events: string[] = []
 
       const result = await agent.run(session, "first", {
@@ -315,7 +315,7 @@ describe("C2 — run-start fault isolation", () => {
     try {
       const session = h.agent.createSession(join(h.dir, "ws"))
       const model = new FakeModel([textResponse("done")])
-      const agent = new MiniCode({ sessionsDir: h.sessionsDir, model })
+      const agent = new LoongCode({ sessionsDir: h.sessionsDir, model })
       const events: string[] = []
       const result = await agent.run(session, "task", { onEvent: e => events.push(e.type) })
 

@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { basename, join } from "node:path"
-import { ModelError } from "@minicode/model"
+import { ModelError } from "@loongcode/model"
 import type { RunEvent } from "../../src/loop/events"
 import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
 import { agentFor } from "../support/loop"

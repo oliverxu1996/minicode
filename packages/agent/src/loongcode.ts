@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { ModelManager, type Model, type ModelConfig } from "@minicode/model"
+import { ModelManager, type Model, type ModelConfig } from "@loongcode/model"
 import { Session } from "./session/session"
 import { SessionStore } from "./session/store"
 import type { RunEvent } from "./loop/events"
@@ -12,26 +12,26 @@ import { loadResources } from "./config/resources"
 import { configDir } from "./config/dir"
 import { CheckpointStore, RewindRecorder } from "./session/checkpoint"
 import { summarizeMessages } from "./context/compaction"
-import type { ModelMessage } from "@minicode/model"
+import type { ModelMessage } from "@loongcode/model"
 
-export interface MiniCodeOptions {
-  /** Session storage directory. Defaults to `~/.minicode/sessions` — sessions
+export interface LoongCodeOptions {
+  /** Session storage directory. Defaults to `~/.loongcode/sessions` — sessions
    *  are kept out of the target repository. */
   sessionsDir?: string
   /** Model override. Defaults to the active model resolved LIVE from
-   *  `@minicode/model` ModelManager at each run. */
+   *  `@loongcode/model` ModelManager at each run. */
   model?: Model
 }
 
 /**
- * MiniCode — the Coding Agent runtime root.
+ * LoongCode — the Coding Agent runtime root.
  *
  * Owns session storage and the default model resolution; every execution
  * flows through `run()`. v0.1 is autonomous: tools are auto-approved, one
  * session works one repository (the session's cwd), and the fixed coding
  * toolset (read/write/edit/grep/find/ls/bash) is always available.
  */
-export class MiniCode {
+export class LoongCode {
   readonly store: SessionStore
   /** Where sessions live; file checkpoints are stored alongside them. */
   readonly sessionsDir: string
@@ -40,7 +40,7 @@ export class MiniCode {
   private readonly modelOverride: Model | undefined
   private readonly sessions = new Map<string, Session>()
 
-  constructor(options: MiniCodeOptions = {}) {
+  constructor(options: LoongCodeOptions = {}) {
     this.sessionsDir = options.sessionsDir ?? defaultSessionsDir()
     this.store = new SessionStore(this.sessionsDir)
     this.recorder = new RewindRecorder(new CheckpointStore(this.sessionsDir))
@@ -119,7 +119,7 @@ export class MiniCode {
         "No active model configured. Create " +
           `${join(configDir(), "models.json")} ` +
           'with {"version":1,"models":[{"id":"…","name":"…","protocol":"openai"|"anthropic","endpoint":"…","model":"…","apiKey":"…","contextWindow":128000,"maxOutputTokens":8192}],"activeModelId":"…"} ' +
-          "and restart, or pass a Model to new MiniCode({ model }).",
+          "and restart, or pass a Model to new LoongCode({ model }).",
       )
     }
     return model
@@ -153,7 +153,7 @@ export class MiniCode {
   }
 
   /** Adds and activates a model configuration (persists). */
-  async configureModel(config: import("@minicode/model").ModelConfig): Promise<void> {
+  async configureModel(config: import("@loongcode/model").ModelConfig): Promise<void> {
     const manager = await ModelManager.load()
     manager.add(config)
     manager.activate(config.id)

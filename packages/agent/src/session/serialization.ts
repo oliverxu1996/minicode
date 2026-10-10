@@ -1,4 +1,4 @@
-import type { ModelMessage } from "@minicode/model"
+import type { ModelMessage } from "@loongcode/model"
 import type { ModelIdentity, RewindNote, RunSummary, SessionMessage } from "./types"
 
 /**

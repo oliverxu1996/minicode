@@ -10,7 +10,7 @@
  * The ordering invariant documented on `executeTool` is load-bearing for crash
  * recovery; see `Session.recover`.
  */
-import type { ModelAssistantPart, ModelResponse } from "@minicode/model"
+import type { ModelAssistantPart, ModelResponse } from "@loongcode/model"
 import { toolDurationMs } from "../session/ledger"
 import type { Session } from "../session/session"
 import type { SessionMessage } from "../session/types"

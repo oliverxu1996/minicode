@@ -1,16 +1,16 @@
 import { readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
-import type { AutocompleteProvider, AutocompleteSuggestions } from "@minicode/tui"
-import { IGNORED_WORKSPACE_ENTRIES } from "@minicode/agent"
+import type { AutocompleteProvider, AutocompleteSuggestions } from "@loongcode/tui"
+import { IGNORED_WORKSPACE_ENTRIES } from "@loongcode/agent"
 
 const MAX_FILES = 200
 
 /**
- * Completions for the MiniCode editor:
+ * Completions for the LoongCode editor:
  * - `/` at the start of the input completes commands (and prompt templates).
  * - `@` anywhere completes workspace file paths.
  */
-export class MiniCodeAutocomplete implements AutocompleteProvider {
+export class LoongCodeAutocomplete implements AutocompleteProvider {
   triggerCharacters = ["/", "@"]
 
   constructor(

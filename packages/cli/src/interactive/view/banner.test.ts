@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { Text, type Component } from "@minicode/tui"
-import { Session } from "@minicode/agent"
+import { Text, type Component } from "@loongcode/tui"
+import { Session } from "@loongcode/agent"
 import { displayWidth } from "../../projection"
 import { TuiHarness } from "./testing"
 import {
@@ -106,12 +106,12 @@ describe("hello banner — tier selection", () => {
 
 	test("thresholds derive from the measured wordmark widths, not a fixed breakpoint", () => {
 		const input = { availableHeight: 100, labelRows: 1, hintRows: 3 }
-		// 5-row wordmark is 47 columns; two columns of margin each side -> 51.
-		expect(selectBannerTier({ ...input, width: 50 })).toBe("medium")
-		expect(selectBannerTier({ ...input, width: 51 })).toBe("large")
-		// 3-row wordmark is 33 columns; 33 + 4 -> 37.
-		expect(selectBannerTier({ ...input, width: 36 })).toBe("single")
-		expect(selectBannerTier({ ...input, width: 37 })).toBe("medium")
+		// 5-row wordmark is 53 columns; two columns of margin each side -> 57.
+		expect(selectBannerTier({ ...input, width: 56 })).toBe("medium")
+		expect(selectBannerTier({ ...input, width: 57 })).toBe("large")
+		// 3-row wordmark is 37 columns; 37 + 4 -> 41.
+		expect(selectBannerTier({ ...input, width: 40 })).toBe("single")
+		expect(selectBannerTier({ ...input, width: 41 })).toBe("medium")
 	})
 
 	test("a short terminal falls back even when the width allows the larger treatment", () => {
@@ -151,7 +151,7 @@ describe("hello banner — content", () => {
 
 	test("narrow terminals fall back to the single-line wordmark", () => {
 		const lines = headerLines(30, 11)
-		expect(plain(lines).some(line => line.trim() === "MINICODE")).toBe(true)
+		expect(plain(lines).some(line => line.trim() === "LOONGCODE")).toBe(true)
 		expect(plain(lines).some(line => line.includes("█"))).toBe(false)
 	})
 
@@ -190,10 +190,14 @@ describe("hello banner — width and height safety", () => {
 	})
 
 	test("the wordmark is never split across lines at any width", () => {
-		for (let width = 8; width <= 200; width++) {
+		// From the narrowest width that can hold the 9-column single-line
+		// fallback. Below that the wordmark is clipped by `centerLine` — the
+		// same policy the label and descriptor already follow for text that
+		// cannot fit — and the width-safety test above still holds.
+		for (let width = 9; width <= 200; width++) {
 			const lines = headerLines(width, 25)
 			const tier = selectBannerTier({ width, availableHeight: 25, labelRows: labelRows(width), hintRows: hintRows(width) })
-			const rows = tier === "large" ? WORDMARK_5 : tier === "medium" ? WORDMARK_3 : ["MINICODE"]
+			const rows = tier === "large" ? WORDMARK_5 : tier === "medium" ? WORDMARK_3 : ["LOONGCODE"]
 			for (const row of rows) {
 				expect(plain(lines).some(line => line.includes(row))).toBe(true)
 			}
@@ -321,13 +325,13 @@ describe("hello banner — hero centering", () => {
 		const lines = renderedHeader(16, 1)
 		expect(lines).toHaveLength(1)
 		expect(leadingBlankRows(lines)).toBe(0)
-		expect(lines[0]).toContain("MINICODE")
+		expect(lines[0]).toContain("LOONGCODE")
 	})
 
 	test("very short viewports keep a centered single-line wordmark rather than clipped hints", () => {
 		const viewport = transcriptHeight(10)
 		const lines = renderedHeader(24, viewport)
-		expect(lines.some(line => line.trim() === "MINICODE")).toBe(true)
+		expect(lines.some(line => line.trim() === "LOONGCODE")).toBe(true)
 		expect(lines.some(line => line.includes("enter submit"))).toBe(false)
 		assertVerticallyCentered(lines, viewport)
 	})
@@ -336,7 +340,7 @@ describe("hello banner — hero centering", () => {
 		for (const [width] of PTY_MATRIX) {
 			// Keep trailing padding so the right margin can be measured.
 			const lines = headerLines(width, transcriptHeight(30)).map(strip)
-			const artRow = lines.find(line => line.includes("█")) ?? lines.find(line => line.trim() === "MINICODE")
+			const artRow = lines.find(line => line.includes("█")) ?? lines.find(line => line.trim() === "LOONGCODE")
 			expect(artRow).toBeDefined()
 			const pad = horizontalPadding(artRow!)
 			expect(Math.abs(pad.left - pad.right)).toBeLessThanOrEqual(1)
@@ -373,7 +377,7 @@ describe("hello banner — transcript-viewport centering integration (PTY matrix
 			// centered, measured on the untrimmed line so the right margin shows.
 			const art = headerLines(width, viewport)
 				.map(strip)
-				.find(line => line.includes("█") || line.trim() === "MINICODE")
+				.find(line => line.includes("█") || line.trim() === "LOONGCODE")
 			expect(art).toBeDefined()
 			const pad = horizontalPadding(art!)
 			expect(Math.abs(pad.left - pad.right)).toBeLessThanOrEqual(1)
@@ -472,7 +476,7 @@ describe("hello banner — empty-state lifecycle", () => {
 		const rows = h.screen()
 		expect(cleanRow(rows[0]!)).toBe("chat-0")
 		expect(rows.join("\n")).not.toContain("█")
-		expect(rows.join("\n")).not.toContain("MINICODE")
+		expect(rows.join("\n")).not.toContain("LOONGCODE")
 	})
 
 	test("D. /new restores the hero, and a notice does not suppress it", () => {
@@ -532,3 +536,19 @@ describe("hello banner — empty-state lifecycle", () => {
 	})
 })
 
+describe("hello banner — wordmark geometry", () => {
+	test("each wordmark is drawn to its declared width, one cell per glyph", () => {
+		expect(WORDMARK_5).toHaveLength(5)
+		expect(WORDMARK_3).toHaveLength(3)
+		// The widths the tier thresholds are derived from. A redrawn wordmark
+		// must change these deliberately, not by accident.
+		for (const row of WORDMARK_5) expect(displayWidth(row)).toBe(53)
+		for (const row of WORDMARK_3) expect(displayWidth(row)).toBe(37)
+		// Every glyph is one cell wide, so centering can never split one, and
+		// each row carries ink.
+		for (const row of [...WORDMARK_5, ...WORDMARK_3]) {
+			for (const glyph of row) expect(displayWidth(glyph)).toBeLessThanOrEqual(1)
+			expect(row.trim().length).toBeGreaterThan(0)
+		}
+	})
+})

@@ -5,13 +5,13 @@ import { join } from "node:path"
 import { CheckpointStore, RewindRecorder, readFileState, resolveInWorkspace, restoreFiles, mutationTargets, type Checkpoint } from "../../src/session/checkpoint"
 import { Compactor } from "../../src/context/compaction"
 import { discardTurns, isLiveCheckpoint, liveCheckpoints, recordRewind, rewindSession, summarizeRange, turnIndexOf } from "../../src/session/rewind"
-import { MiniCode } from "../../src/minicode"
+import { LoongCode } from "../../src/loongcode"
 import { Session } from "../../src/session/session"
 import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
 import { agentFor } from "../support/loop"
 
 function workspace(): { dir: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "minicode-rewind-"))
+  const dir = mkdtempSync(join(tmpdir(), "loongcode-rewind-"))
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
@@ -528,8 +528,8 @@ describe("rewind — compaction", () => {
    * the last.
    */
   async function threeTurnSession(): Promise<{ session: Session; cleanup: () => void }> {
-    const dir = mkdtempSync(join(tmpdir(), "minicode-compact-rewind-"))
-    const session = new MiniCode({ sessionsDir: join(dir, "sessions") }).createSession(dir)
+    const dir = mkdtempSync(join(tmpdir(), "loongcode-compact-rewind-"))
+    const session = new LoongCode({ sessionsDir: join(dir, "sessions") }).createSession(dir)
     for (const [turnId, text] of [["t1", "a".repeat(12_000)], ["t2", "b".repeat(12_000)], ["t3", "recent"]] as const) {
       session.pushUser(text, turnId)
       session.appendAssistant([{ type: "text", text: `did ${turnId}` }], {})
@@ -567,7 +567,7 @@ describe("rewind — compaction", () => {
       await new Compactor(new FakeModel([textResponse("summary")]), 1000).compact(session)
 
       const sessionsDir = join(session.cwd, "sessions")
-      const reloaded = await new MiniCode({ sessionsDir }).loadSession(session.id)
+      const reloaded = await new LoongCode({ sessionsDir }).loadSession(session.id)
       expect(liveCheckpoints(stored, reloaded.messages).map(c => c.id)).toEqual(["c3"])
       expect(turnIndexOf(reloaded.messages, "t3")).toBe(turnIndexOf(session.messages, "t3"))
     } finally {
@@ -627,12 +627,12 @@ describe("rewind — the session's shell warning", () => {
   test("the note round-trips through persistence", async () => {
     const { dir, cleanup } = workspace()
     try {
-      const agent = new MiniCode({ sessionsDir: join(dir, "sessions") })
+      const agent = new LoongCode({ sessionsDir: join(dir, "sessions") })
       const session = agent.createSession(dir)
       recordRewind(session, [checkpoint(2)])
       await session.checkpoint()
 
-      const reloaded = await new MiniCode({ sessionsDir: join(dir, "sessions") }).loadSession(session.id)
+      const reloaded = await new LoongCode({ sessionsDir: join(dir, "sessions") }).loadSession(session.id)
       expect(reloaded.rewind).toEqual({ shellTurns: 1, shellCommands: 2, at: expect.any(Number) })
     } finally {
       cleanup()
@@ -703,7 +703,7 @@ describe("rewind — file restoration", () => {
   test("refuses a symlink rather than writing through it", async () => {
     const { dir, cleanup } = workspace()
     try {
-      const outside = join(dir, "..", `minicode-outside-${Date.now()}.txt`)
+      const outside = join(dir, "..", `loongcode-outside-${Date.now()}.txt`)
       writeFileSync(outside, "outside\n")
       symlinkSync(outside, join(dir, "link.txt"))
       const state = await readFileState(join(dir, "link.txt"))
@@ -726,7 +726,7 @@ describe("rewind — conversation restoration", () => {
   async function twoTurnSession(dir: string): Promise<Session> {
     // Created through the runtime so the durable sink is registered; a bare
     // `Session.create` has none and never writes.
-    const session = new MiniCode({ sessionsDir: join(dir, "sessions") }).createSession(dir)
+    const session = new LoongCode({ sessionsDir: join(dir, "sessions") }).createSession(dir)
     session.pushUser("first", "t1")
     session.appendAssistant([{ type: "text", text: "a1" }], {})
     session.pushUser("second", "t2")
@@ -747,7 +747,7 @@ describe("rewind — conversation restoration", () => {
       expect(outcome.prompt).toBe("second")
 
       // Persisted, so a reload cannot resurrect the removed turn.
-      const reloaded = await new MiniCode({ sessionsDir: join(dir, "sessions") }).loadSession(session.id)
+      const reloaded = await new LoongCode({ sessionsDir: join(dir, "sessions") }).loadSession(session.id)
       expect(reloaded.messages).toHaveLength(2)
       expect(reloaded.messages.map(m => m.role)).toEqual(["user", "assistant"])
     } finally {

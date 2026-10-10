@@ -1,5 +1,5 @@
 /**
- * Terminal UI framework used by the MiniCode TUI.
+ * Terminal UI framework used by the LoongCode TUI.
  */
 
 export { TuiMainScreen } from "./tui-main-screen.ts"

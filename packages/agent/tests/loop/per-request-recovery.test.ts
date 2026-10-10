@@ -15,13 +15,13 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { MiniCode } from "../../src/minicode"
+import { LoongCode } from "../../src/loongcode"
 import { Session } from "../../src/session/session"
 import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
-import type { ModelRequest } from "@minicode/model"
+import type { ModelRequest } from "@loongcode/model"
 
 function tempDir(): { dir: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "minicode-per-request-"))
+  const dir = mkdtempSync(join(tmpdir(), "loongcode-per-request-"))
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
@@ -59,7 +59,7 @@ describe("per-request recovery ordering", () => {
         toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }]),
         textResponse("final after steering"),
       ])
-      const agent = new MiniCode({ sessionsDir, model })
+      const agent = new LoongCode({ sessionsDir, model })
       const session = agent.createSession(join(dir, "ws"))
 
       const order: string[] = []
@@ -102,7 +102,7 @@ describe("tool-only response followed by steering", () => {
         toolCallResponse([{ toolCallId: "call_1", toolName: "bash", input: { command: "echo hi" } }]),
         textResponse("final after steering"),
       ])
-      const agent = new MiniCode({ sessionsDir, model })
+      const agent = new LoongCode({ sessionsDir, model })
       const session = agent.createSession(join(dir, "ws"))
 
       // Steer queued before the run: the tool-only response is captured, the
@@ -139,7 +139,7 @@ describe("multiple unresolved calls", () => {
     try {
       const sessionsDir = join(dir, "sessions")
       const model = new FakeModel([textResponse("done")])
-      const agent = new MiniCode({ sessionsDir, model })
+      const agent = new LoongCode({ sessionsDir, model })
       const session = agent.createSession(join(dir, "ws"))
 
       // The durable state a steering interruption can leave: an assistant turn
@@ -182,7 +182,7 @@ describe("steering without a tool call", () => {
         textResponse("partial answer"),
         textResponse("final after steering"),
       ])
-      const agent = new MiniCode({ sessionsDir, model })
+      const agent = new LoongCode({ sessionsDir, model })
       const session = agent.createSession(join(dir, "ws"))
       session.steer("redirect")
 
@@ -272,7 +272,7 @@ describe("in-process and reload equivalence", () => {
       const sessionsDir = join(dir, "sessions")
 
       const buildInterrupted = async (ws: string): Promise<Session> => {
-        const agent = new MiniCode({
+        const agent = new LoongCode({
           sessionsDir,
           model: new FakeModel([
             toolCallResponse([{ toolCallId: "c1", toolName: "bash", input: {} }]),
@@ -290,14 +290,14 @@ describe("in-process and reload equivalence", () => {
       // In-process continuation.
       const inProc = await buildInterrupted(join(dir, "ws-a"))
       const modelInProc = new FakeModel([textResponse("ok")])
-      const agentInProc = new MiniCode({ sessionsDir, model: modelInProc })
+      const agentInProc = new LoongCode({ sessionsDir, model: modelInProc })
       await agentInProc.run(inProc, "continue")
 
       // Reload continuation.
       const reloaded = await buildInterrupted(join(dir, "ws-b"))
       await reloaded.checkpoint()
       const modelReload = new FakeModel([textResponse("ok")])
-      const agentReload = new MiniCode({ sessionsDir, model: modelReload })
+      const agentReload = new LoongCode({ sessionsDir, model: modelReload })
       const fresh = await agentReload.loadSession(reloaded.id)
       await agentReload.run(fresh, "continue")
 

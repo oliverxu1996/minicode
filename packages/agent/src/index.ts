@@ -1,7 +1,7 @@
 /**
- * `@minicode/agent` — the MiniCode Coding Agent runtime.
+ * `@loongcode/agent` — the LoongCode Coding Agent runtime.
  *
- * Public surface: the `MiniCode` runtime root (session lifecycle + the
+ * Public surface: the `LoongCode` runtime root (session lifecycle + the
  * autonomous `run()` door), the durable session types, the configuration
  * adapters, and the context-budget and compaction capabilities the
  * application composes. Tools and the loop are internal details of `run()`.
@@ -9,8 +9,8 @@
 
 export { contextBudget } from "./context/budget"
 export type { ContextBudget } from "./context/budget"
-export { MiniCode } from "./minicode"
-export type { MiniCodeOptions, RunResult } from "./minicode"
+export { LoongCode } from "./loongcode"
+export type { LoongCodeOptions, RunResult } from "./loongcode"
 export { Session, UNKNOWN_OUTCOME_ERROR, type RecoveryReport } from "./session/session"
 export { SessionStore } from "./session/store"
 export { ToolLedger, type ToolLedgerEntry, type ToolLedgerStatus } from "./session/ledger"
@@ -27,7 +27,7 @@ export type {
   UserMessage,
 } from "./session/types"
 export { Compactor, type CompactionOutcome } from "./context/compaction"
-export { configDir, migrateLegacyConfig } from "./config/dir"
+export { configDir } from "./config/dir"
 export { loadSettings } from "./config/settings"
 export {
   loadResources,

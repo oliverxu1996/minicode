@@ -1,4 +1,4 @@
-# @minicode/tui
+# @loongcode/tui
 
 Terminal UI framework package.
 

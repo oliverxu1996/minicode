@@ -6,7 +6,7 @@ import { expandFileReferences } from "./expand"
 
 describe("@file expansion", () => {
   test("expands an existing file reference into a marked block", () => {
-    const dir = mkdtempSync(join(tmpdir(), "minicode-expand-"))
+    const dir = mkdtempSync(join(tmpdir(), "loongcode-expand-"))
     try {
       writeFileSync(join(dir, "notes.md"), "# Notes\nthe payload")
       const expanded = expandFileReferences("review @notes.md please", dir)
@@ -20,7 +20,7 @@ describe("@file expansion", () => {
   })
 
   test("leaves unresolved references untouched", () => {
-    const dir = mkdtempSync(join(tmpdir(), "minicode-expand-"))
+    const dir = mkdtempSync(join(tmpdir(), "loongcode-expand-"))
     try {
       const expanded = expandFileReferences("email me @someone about @missing.txt", dir)
       expect(expanded).toContain("@someone")
@@ -31,7 +31,7 @@ describe("@file expansion", () => {
   })
 
   test("truncates oversized files", () => {
-    const dir = mkdtempSync(join(tmpdir(), "minicode-expand-"))
+    const dir = mkdtempSync(join(tmpdir(), "loongcode-expand-"))
     try {
       writeFileSync(join(dir, "big.txt"), "x".repeat(300 * 1024))
       const expanded = expandFileReferences("see @big.txt", dir)

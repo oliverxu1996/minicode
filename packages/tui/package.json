@@ -1,5 +1,5 @@
 {
-  "name": "@minicode/tui",
+  "name": "@loongcode/tui",
   "version": "0.1.0",
   "private": true,
   "type": "module",

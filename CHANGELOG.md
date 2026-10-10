@@ -1,12 +1,12 @@
 # Changelog
 
-All notable changes to MiniCode will be documented in this file.
+All notable changes to LoongCode will be documented in this file.
 
 ## [Unreleased]
 
 ### Added
 
-- An empty transcript now opens with a large `MINICODE` block wordmark and the
+- An empty transcript now opens with a large `LOONGCODE` block wordmark and the
   descriptor "an opinionated coding agent", followed by the existing keyboard
   hints. The hero is a true empty state: it is centered as a group in the
   transcript viewport — horizontally, and vertically within the available
@@ -21,16 +21,27 @@ All notable changes to MiniCode will be documented in this file.
 
 ### Changed
 
+- **The product is now LoongCode.** The rename is complete across the CLI,
+  its runtime, its configuration and its documentation. Command, package,
+  binary and configuration names are all `loongcode`: the CLI is
+  `@loongcode/cli`, the executable is `loongcode`, and the user-scope
+  configuration directory is `~/.loongcode/` (project-scope configuration is
+  `.loongcode/`). The `MINICODE_CONFIG_DIR` override is replaced by
+  `LOONGCODE_CONFIG_DIR`. The wordmark, help text, and agent identity all read
+  LoongCode. There is no compatibility shim for the previous names: the old
+  configuration directory and environment variable are no longer read, so an
+  existing installation starts from its defaults and must be pointed at its
+  configuration again.
 - Prompt templates are now discovered live. The editor's `/` autocomplete and
-  template invocation read `.minicode/prompts/*.md` (and `~/.minicode/prompts/`)
-  from disk as needed, so a template added, edited, or removed while MiniCode
+  template invocation read `.loongcode/prompts/*.md` (and `~/.loongcode/prompts/`)
+  from disk as needed, so a template added, edited, or removed while LoongCode
   is running takes effect immediately with no manual refresh. Prompt contents
   were already resolved from disk at invocation time.
-- Project-local prompts (`.minicode/prompts/*.md`) and skills
-  (`.minicode/skills/<name>/SKILL.md`) now load unconditionally. The
+- Project-local prompts (`.loongcode/prompts/*.md`) and skills
+  (`.loongcode/skills/<name>/SKILL.md`) now load unconditionally. The
   per-project trust decision was removed, so no consent step is required
   before these resources reach the model. Global resources under
-  `~/.minicode/` are unchanged.
+  `~/.loongcode/` are unchanged.
 - `/model` is now a single command with no subcommands or argument forms. It
   opens one picker that selects an existing configured model or offers
   `Add model…`, which launches the guided configuration wizard. Model
@@ -52,7 +63,7 @@ All notable changes to MiniCode will be documented in this file.
   left to refresh manually.
 - Slash command `/trust` and the project-trust mechanism behind it
   (`isProjectTrusted`, `trustProject`, and the `projectTrusted` settings
-  key). Existing `.minicode/settings.json` files that still contain
+  key). Existing `.loongcode/settings.json` files that still contain
   `projectTrusted` remain valid; the key is simply ignored.
 - Slash commands `/import` and `/export`. Session portability is not a
   current product need; sessions are still persisted and recovered through

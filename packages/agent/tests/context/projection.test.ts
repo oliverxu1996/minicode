@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ModelMessage } from "@minicode/model"
+import type { ModelMessage } from "@loongcode/model"
 import { estimateTokens } from "../../src/context/budget"
 import {
   pruneOldToolOutputs,
@@ -337,7 +337,7 @@ describe("the marker is structurally distinguishable from real output", () => {
     expect(marker.type).not.toBe("text")
     expect(marker.type).not.toBe("tool_error")
     if (!isPrunedToolOutput(marker)) throw new Error("expected a marker")
-    expect(marker.value.minicodePruned).toBe(true)
+    expect(marker.value.loongcodePruned).toBe(true)
     expect(marker.value.reason).toBe("request-over-budget")
   })
 
@@ -379,7 +379,7 @@ describe("the marker is structurally distinguishable from real output", () => {
 // ---------------------------------------------------------------------------
 
 describe("failure evidence survives capture-time truncation (I3)", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "minicode-prune-truncate-"))
+  const cwd = mkdtempSync(join(tmpdir(), "loongcode-prune-truncate-"))
 
   test("short output is returned unchanged, keeping the flag", () => {
     const result = { ok: true as const, data: "boom\n(exit code: 1)", failureEvidence: true as const }
@@ -421,7 +421,7 @@ describe("failure evidence survives capture-time truncation (I3)", () => {
 
 describe("integration: Session projection vs durable state (I1/I8/I9)", () => {
   const buildSession = (markFailureOnTurn?: number) => {
-    const cwd = mkdtempSync(join(tmpdir(), "minicode-prune-session-"))
+    const cwd = mkdtempSync(join(tmpdir(), "loongcode-prune-session-"))
     const session = Session.create({ cwd })
     for (let turn = 1; turn <= 4; turn++) {
       session.pushUser(`turn ${turn}`)
@@ -458,7 +458,7 @@ describe("integration: Session projection vs durable state (I1/I8/I9)", () => {
     try {
       session.toRequestMessages({ inputBudget: budget })
       const persisted = JSON.stringify(session.toJSON())
-      expect(persisted).not.toContain("minicodePruned")
+      expect(persisted).not.toContain("loongcodePruned")
       expect(persisted).not.toContain("request-over-budget")
       // The withheld bytes are still fully durable.
       expect(persisted).toContain("z".repeat(100))

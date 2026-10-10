@@ -1,4 +1,4 @@
-import type { ModelUsage } from "@minicode/model"
+import type { ModelUsage } from "@loongcode/model"
 import type { ModelIdentity, RunFinishReason, RunSummary } from "../session/types"
 
 /**

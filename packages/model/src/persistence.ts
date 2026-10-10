@@ -17,11 +17,17 @@ interface PersistedState {
 
 const EMPTY_STATE: PersistedState = { version: 1, models: [], activeModelId: null }
 
-/** Location of the configuration file: `~/.minicode/models.json`, overridable
- *  with `MINICODE_CONFIG_DIR` so tests and alternative installs can redirect
- *  it — the same location the rest of the runtime uses. */
-function configPath(): string {
-  const base = process.env.MINICODE_CONFIG_DIR ?? join(homedir(), ".minicode")
+/**
+ * Location of the configuration file: `~/.loongcode/models.json`, overridable
+ * with `LOONGCODE_CONFIG_DIR` so tests and alternative installs can redirect
+ * it — the same location the rest of the runtime uses.
+ *
+ * Exported so the one config root this runtime has can be ASSERTED rather
+ * than assumed: the agent layer resolves the same directory independently,
+ * and the two must not drift.
+ */
+export function statePath(): string {
+  const base = process.env.LOONGCODE_CONFIG_DIR ?? join(homedir(), ".loongcode")
   return join(base, "models.json")
 }
 
@@ -34,7 +40,7 @@ function configPath(): string {
  * silently replaced or repaired.
  */
 export function loadState(): PersistedState {
-  const path = configPath()
+  const path = statePath()
   let raw: string
   try {
     raw = readFileSync(path, "utf-8")
@@ -63,7 +69,7 @@ export function loadState(): PersistedState {
  * either the previous or the new state, never a partial write.
  */
 export function saveState(models: readonly ModelConfig[], activeModelId: string | null): void {
-  const path = configPath()
+  const path = statePath()
   const state: PersistedState = { version: 1, models, activeModelId }
   const payload = JSON.stringify(state, null, 2)
   const temporary = `${path}.tmp`

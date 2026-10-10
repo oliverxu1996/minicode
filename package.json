@@ -1,5 +1,5 @@
 {
-  "name": "minicode",
+  "name": "loongcode",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -7,7 +7,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "build:cli": "bun build --target=bun --minify --banner '#!/usr/bin/env bun' --outfile packages/cli/dist/minicode.js packages/cli/src/main.ts && chmod +x packages/cli/dist/minicode.js"
+    "build:cli": "bun build --target=bun --minify --banner '#!/usr/bin/env bun' --outfile packages/cli/dist/loongcode.js packages/cli/src/main.ts && chmod +x packages/cli/dist/loongcode.js"
   },
   "devDependencies": {
     "@types/bun": "1.3.13",

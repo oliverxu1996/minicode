@@ -2,25 +2,25 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { MiniCode, type Session } from "@minicode/agent"
+import { LoongCode, type Session } from "@loongcode/agent"
 import { cloneSession, forkCandidates, forkSession } from "./operations"
 
 interface Fixture {
   readonly dir: string
   readonly sessionsDir: string
-  readonly agent: MiniCode
+  readonly agent: LoongCode
   reload(id: string): Promise<Session>
   cleanup(): void
 }
 
 function fixture(): Fixture {
-  const dir = mkdtempSync(join(tmpdir(), "minicode-session-ops-"))
+  const dir = mkdtempSync(join(tmpdir(), "loongcode-session-ops-"))
   const sessionsDir = join(dir, "sessions")
   return {
     dir,
     sessionsDir,
-    agent: new MiniCode({ sessionsDir }),
-    reload: async (id: string): Promise<Session> => await new MiniCode({ sessionsDir }).loadSession(id),
+    agent: new LoongCode({ sessionsDir }),
+    reload: async (id: string): Promise<Session> => await new LoongCode({ sessionsDir }).loadSession(id),
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   }
 }

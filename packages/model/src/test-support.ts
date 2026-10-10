@@ -3,9 +3,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Model, ModelConfig } from "./index"
 import { ModelManager } from "./index"
+import { statePath } from "./persistence"
 
 /**
- * Runs `run` with `MINICODE_CONFIG_DIR` redirected to a fresh temporary
+ * Runs `run` with `LOONGCODE_CONFIG_DIR` redirected to a fresh temporary
  * directory, restoring the environment and removing the directory after.
  *
  * Configuration loads and mutations execute synchronously once triggered, so
@@ -13,26 +14,26 @@ import { ModelManager } from "./index"
  * each call observe its own directory even if test files interleave.
  */
 export async function withConfigDir<T>(run: () => Promise<T> | T): Promise<T> {
-  const dir = mkdtempSync(join(tmpdir(), "minicode-model-test-"))
-  const previous = process.env.MINICODE_CONFIG_DIR
-  process.env.MINICODE_CONFIG_DIR = dir
+  const dir = mkdtempSync(join(tmpdir(), "loongcode-model-test-"))
+  const previous = process.env.LOONGCODE_CONFIG_DIR
+  process.env.LOONGCODE_CONFIG_DIR = dir
   try {
     return await run()
   } finally {
-    if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
-    else process.env.MINICODE_CONFIG_DIR = previous
+    if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+    else process.env.LOONGCODE_CONFIG_DIR = previous
     rmSync(dir, { recursive: true, force: true })
   }
 }
 
 /** The configuration file path inside the current config dir. */
 export function configFile(): string {
-  return join(process.env.MINICODE_CONFIG_DIR!, "models.json")
+  return statePath()
 }
 
 /** Writes a configuration file directly, bypassing the manager. */
 export function writeConfigFile(content: string): void {
-  mkdirSync(process.env.MINICODE_CONFIG_DIR!, { recursive: true })
+  mkdirSync(process.env.LOONGCODE_CONFIG_DIR!, { recursive: true })
   writeFileSync(configFile(), content, "utf-8")
 }
 

@@ -1,4 +1,4 @@
-import type { ModelAssistantPart, ModelMessage, ModelToolResult, ModelUsage } from "@minicode/model"
+import type { ModelAssistantPart, ModelMessage, ModelToolResult, ModelUsage } from "@loongcode/model"
 import type { ModelIdentity, RewindNote, RunFinishReason, RunSummary, SessionMessage, SessionStatus } from "./types"
 import { ToolLedger } from "./ledger"
 import { parseMessages, parseRewindNote, parseRuns, validateReplacementHistory } from "./serialization"

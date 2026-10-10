@@ -4,14 +4,14 @@ import type {
   ModelProtocol,
   ModelToolResult,
   ModelUsage,
-} from "@minicode/model"
+} from "@loongcode/model"
 import type { PruneStats } from "../context/projection"
 import type { ToolAffordances } from "../tools/types"
 
 /**
  * One durable conversation entry.
  *
- * Content is exactly the canonical `@minicode/model` message shape, so a
+ * Content is exactly the canonical `@loongcode/model` message shape, so a
  * session serializes to a `ModelRequest.messages` array without
  * transformation — tool calls live in assistant messages, results in
  * `role: "tool"` messages, correlated by `toolCallId`.

@@ -2,33 +2,33 @@ import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { listPromptTemplates } from "@minicode/agent"
+import { listPromptTemplates } from "@loongcode/agent"
 import { COMMANDS, findCommand } from "./commands"
 import { autocompleteItems, resolveSlashInput } from "./app"
-import { MiniCodeAutocomplete } from "./input/autocomplete"
+import { LoongCodeAutocomplete } from "./input/autocomplete"
 
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), "minicode-templates-test-"))
+  return mkdtempSync(join(tmpdir(), "loongcode-templates-test-"))
 }
 
 /** Runs a test against a throwaway project and user config dir. */
 async function withProject(run: (dir: string, userDir: string) => void | Promise<void>): Promise<void> {
   const dir = tempDir()
   const userDir = tempDir()
-  const previous = process.env.MINICODE_CONFIG_DIR
-  process.env.MINICODE_CONFIG_DIR = userDir
+  const previous = process.env.LOONGCODE_CONFIG_DIR
+  process.env.LOONGCODE_CONFIG_DIR = userDir
   try {
     await run(dir, userDir)
   } finally {
-    if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
-    else process.env.MINICODE_CONFIG_DIR = previous
+    if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+    else process.env.LOONGCODE_CONFIG_DIR = previous
     rmSync(dir, { recursive: true, force: true })
     rmSync(userDir, { recursive: true, force: true })
   }
 }
 
 function writeTemplate(root: string, name: string, content: string, scope: "project" | "user" = "project"): void {
-  const dir = scope === "user" ? join(root, "prompts") : join(root, ".minicode", "prompts")
+  const dir = scope === "user" ? join(root, "prompts") : join(root, ".loongcode", "prompts")
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, `${name}.md`), content)
 }
@@ -45,7 +45,7 @@ describe("live prompt-template discovery", () => {
       writeTemplate(dir, "fresh", "Fresh body")
       expect(listPromptTemplates(dir)).toContainEqual({ name: "fresh", source: "project" })
 
-      const provider = new MiniCodeAutocomplete(
+      const provider = new LoongCodeAutocomplete(
         () => autocompleteItems(dir),
         () => dir,
       )
@@ -57,7 +57,7 @@ describe("live prompt-template discovery", () => {
       expect(resolveSlashInput(dir, "fresh")).toEqual({ kind: "template", content: "Fresh body" })
 
       // Removing it takes it out of discovery as well.
-      rmSync(join(dir, ".minicode", "prompts", "fresh.md"))
+      rmSync(join(dir, ".loongcode", "prompts", "fresh.md"))
       expect(listPromptTemplates(dir).map(t => t.name)).not.toContain("fresh")
       expect(resolveSlashInput(dir, "fresh")).toEqual({ kind: "unknown" })
       const afterRemoval = await provider.getSuggestions(["/fr"], 0, 3)

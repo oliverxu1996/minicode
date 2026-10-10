@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionMessage } from "@minicode/agent"
+import type { SessionMessage } from "@loongcode/agent"
 import { ToolExecutionComponent, replayMessage, toolArgumentSummary } from "./components"
 
 function render(component: { render(width: number): string[] }): string {

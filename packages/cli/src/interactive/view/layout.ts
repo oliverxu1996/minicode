@@ -1,4 +1,4 @@
-import { Container, ScrollView, VStack, type Component } from "@minicode/tui"
+import { Container, ScrollView, VStack, type Component } from "@loongcode/tui"
 
 /**
  * The pieces the interactive TUI pins around its scrollable conversation.
@@ -45,7 +45,7 @@ export function fixedChromeRows(components: readonly Component[], width: number)
 }
 
 /**
- * Compose the approved MiniCode TUI layout:
+ * Compose the approved LoongCode TUI layout:
  *
  * ```text
  * VStack

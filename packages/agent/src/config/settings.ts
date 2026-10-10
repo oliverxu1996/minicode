@@ -4,7 +4,7 @@ import { configDir } from "./dir"
 
 /** Runtime-tunable settings: global file merged under project
  *  file (project wins), nested objects merge recursively. */
-export interface MiniCodeSettings {
+export interface LoongCodeSettings {
   /** Default active model id (ModelManager still owns credentials). */
   model?: string
   autoCompact?: {
@@ -16,13 +16,13 @@ export interface MiniCodeSettings {
   theme?: "dark" | "light"
 }
 
-const DEFAULTS: MiniCodeSettings = {
+const DEFAULTS: LoongCodeSettings = {
   autoCompact: { enabled: true, thresholdPct: 80 },
   theme: "dark",
 }
 
 export interface LoadedSettings {
-  settings: MiniCodeSettings
+  settings: LoongCodeSettings
   /** Merged view for display; sources for diagnostics. */
   globalPath: string
   projectPath: string | null
@@ -34,12 +34,12 @@ export function globalSettingsPath(): string {
 }
 
 export function projectSettingsPath(cwd: string): string {
-  return join(cwd, ".minicode", "settings.json")
+  return join(cwd, ".loongcode", "settings.json")
 }
 
 /** Reads and validates one settings file; invalid JSON or shape throws
  *  `configuration_error`-style Error (callers surface it). */
-function readSettingsFile(path: string, exists: boolean): Partial<MiniCodeSettings> {
+function readSettingsFile(path: string, exists: boolean): Partial<LoongCodeSettings> {
   if (!exists) return {}
   let parsed: unknown
   try {
@@ -50,12 +50,12 @@ function readSettingsFile(path: string, exists: boolean): Partial<MiniCodeSettin
   return validateSettings(parsed, path)
 }
 
-function validateSettings(input: unknown, path: string): Partial<MiniCodeSettings> {
+function validateSettings(input: unknown, path: string): Partial<LoongCodeSettings> {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new Error(`invalid settings file ${path}: expected an object`)
   }
   const record = input as Record<string, unknown>
-  const out: Partial<MiniCodeSettings> = {}
+  const out: Partial<LoongCodeSettings> = {}
   if (record.model !== undefined) {
     if (typeof record.model !== "string") throw new Error(`invalid settings file ${path}: model must be a string`)
     out.model = record.model

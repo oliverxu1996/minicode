@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { ModelError } from "@minicode/model"
+import { ModelError } from "@loongcode/model"
 import { Compactor } from "../../src/context/compaction"
 import { Session } from "../../src/session/session"
 import { FakeModel, textResponse } from "../support/testing"
@@ -8,7 +8,7 @@ import { FakeModel, textResponse } from "../support/testing"
  *  preserved tail stops before it, and a trailing assistant turn so the last
  *  message is not the last user message. */
 function sessionWithHistory(): Session {
-  const session = Session.create({ cwd: "/tmp/minicode-compact-test" })
+  const session = Session.create({ cwd: "/tmp/loongcode-compact-test" })
   session.pushUser("x".repeat(12_000))
   session.pushUser("y".repeat(4_000))
   session.appendAssistant([{ type: "text", text: "working" }], {})
@@ -32,7 +32,7 @@ describe("compaction reports what its own model call consumed (O4)", () => {
   })
 
   test("a compaction that cannot start reports no usage and calls no model", async () => {
-    const session = Session.create({ cwd: "/tmp/minicode-compact-test" })
+    const session = Session.create({ cwd: "/tmp/loongcode-compact-test" })
     session.pushUser("the only turn") // the last message is a user message
     const model = new FakeModel([textResponse("summary")])
 

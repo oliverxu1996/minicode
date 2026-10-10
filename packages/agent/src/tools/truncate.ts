@@ -16,7 +16,7 @@ function hash(s: string): string {
 
 /**
  * Caps tool output at THRESHOLD bytes: larger outputs spill to
- * `<os.tmpdir()>/minicode-tool-output/<tool>-<hash>.txt` and the model receives
+ * `<os.tmpdir()>/loongcode-tool-output/<tool>-<hash>.txt` and the model receives
  * a preview plus a pointer it can `read` with offset/limit.
  *
  * The spill lives in the OS temp directory rather than the workspace: the full
@@ -38,7 +38,7 @@ export function truncateOutput(result: ToolResult, toolName?: string): ToolResul
   if (text.length <= THRESHOLD) return result
 
   const slug = `${toolName ?? "tool"}-${hash(text)}.txt`
-  const dir = join(tmpdir(), "minicode-tool-output")
+  const dir = join(tmpdir(), "loongcode-tool-output")
   try {
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, slug), text, "utf-8")

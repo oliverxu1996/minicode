@@ -1,4 +1,4 @@
-import type { Component } from "@minicode/tui"
+import type { Component } from "@loongcode/tui"
 import { ansi } from "./theme"
 import {
   displayWidth,

@@ -1,7 +1,7 @@
-import type { ModelLimits, ModelUsage } from "@minicode/model"
+import type { ModelLimits, ModelUsage } from "@loongcode/model"
 import { eastAsianWidth } from "get-east-asian-width"
-import { contextBudget } from "@minicode/agent"
-import type { RunEvent, RunFinishReason, RunSummary } from "@minicode/agent"
+import { contextBudget } from "@loongcode/agent"
+import type { RunEvent, RunFinishReason, RunSummary } from "@loongcode/agent"
 
 /**
  * Pure projections of runtime facts into display text.
@@ -192,7 +192,7 @@ export interface FooterInput {
 export interface ContextDisplay {
   /** Last completed request's input tokens. */
   readonly used: number
-  /** MiniCode's usable input budget: `floor(contextWindow × 0.75)`. */
+  /** LoongCode's usable input budget: `floor(contextWindow × 0.75)`. */
   readonly capacity: number
   /** `used / capacity` as a whole percent; may exceed 100. */
   readonly percent: number
@@ -368,7 +368,7 @@ function footerRow1(input: FooterInput): FooterRow {
 /**
  * Row 2 — usage: context (this request) then run totals (cumulative).
  *
- * The context denominator is always MiniCode's usable input budget; the model's
+ * The context denominator is always LoongCode's usable input budget; the model's
  * total window is shown only in row 1. Above budget the gauge saturates, the
  * number stays truthful, and the percent is not shown as if it were ordinary.
  */

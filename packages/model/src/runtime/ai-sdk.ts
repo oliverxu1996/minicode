@@ -387,7 +387,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * Maps MiniCode messages to SDK messages.
+ * Maps LoongCode messages to SDK messages.
  *
  * Tool-call/tool-result correlation is preserved structurally: assistant
  * `tool_call` parts become SDK tool-call parts, and tool results become SDK

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import cliManifest from "../package.json" with { type: "json" }
-import { MINICODE_VERSION } from "./version"
+import { LOONGCODE_VERSION } from "./version"
 import { helpText, runCli, type CliIO } from "./main"
 
 interface Captured {
@@ -27,13 +27,13 @@ function capture(stdinIsTTY: boolean): Captured {
 }
 
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), "minicode-cli-test-"))
+  return mkdtempSync(join(tmpdir(), "loongcode-cli-test-"))
 }
 
 describe("CLI help", () => {
   test("describes the product command, not a development path", () => {
     const help = helpText()
-    expect(help).toContain("usage: minicode [options] [workspace]")
+    expect(help).toContain("usage: loongcode [options] [workspace]")
     expect(help).not.toContain("bun packages/")
     expect(help).not.toContain("main.ts")
   })
@@ -49,7 +49,7 @@ describe("CLI help", () => {
     for (const flag of ["--help", "-h"]) {
       const c = capture(false)
       expect(await runCli([flag], c.io)).toBe(0)
-      expect(c.stdout()).toContain("usage: minicode")
+      expect(c.stdout()).toContain("usage: loongcode")
       expect(c.stderr()).toBe("")
     }
   })
@@ -60,20 +60,28 @@ describe("CLI version", () => {
     for (const flag of ["--version", "-v"]) {
       const c = capture(false)
       expect(await runCli([flag], c.io)).toBe(0)
-      expect(c.stdout()).toBe(MINICODE_VERSION + "\n")
+      expect(c.stdout()).toBe(LOONGCODE_VERSION + "\n")
       expect(c.stderr()).toBe("")
     }
   })
 
   test("agrees with the published CLI package manifest", () => {
-    expect(MINICODE_VERSION).toBe(cliManifest.version)
+    expect(LOONGCODE_VERSION).toBe(cliManifest.version)
+  })
+
+  test("the executable and the build output are the same entry point", () => {
+    const rootManifest = JSON.parse(readFileSync(join(import.meta.dir, "../../../package.json"), "utf-8"))
+    const outfile = (rootManifest.scripts["build:cli"] as string).match(/--outfile (\S+)/)![1]
+    expect(Object.keys(cliManifest.bin)).toEqual(["loongcode"])
+    // The published bin and what the build actually writes cannot drift apart.
+    expect(outfile).toBe(`packages/cli/${cliManifest.bin["loongcode"]}`)
   })
 
   test("agrees with the newest changelog release", () => {
     const changelog = readFileSync(join(import.meta.dir, "../../../CHANGELOG.md"), "utf-8")
     const firstRelease = changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m)
     expect(firstRelease).not.toBeNull()
-    expect(firstRelease![1]).toBe(MINICODE_VERSION)
+    expect(firstRelease![1]).toBe(LOONGCODE_VERSION)
   })
 })
 
@@ -85,7 +93,7 @@ describe("CLI interactive guard", () => {
     // Nothing may be written to stdout: a refused start must not paint the UI.
     expect(c.stdout()).toBe("")
     expect(c.stderr()).toContain("stdin is not a terminal")
-    expect(c.stderr()).toContain("minicode -p")
+    expect(c.stderr()).toContain("loongcode -p")
   })
 
   test("the guard applies to a workspace argument too", async () => {
@@ -101,8 +109,8 @@ describe("CLI interactive guard", () => {
 
   test("print mode is not blocked by the guard", async () => {
     const dir = tempDir()
-    const previous = process.env.MINICODE_CONFIG_DIR
-    process.env.MINICODE_CONFIG_DIR = dir
+    const previous = process.env.LOONGCODE_CONFIG_DIR
+    process.env.LOONGCODE_CONFIG_DIR = dir
     try {
       const c = capture(false)
       // No model is configured in the isolated config dir, so this fails on
@@ -111,8 +119,8 @@ describe("CLI interactive guard", () => {
       expect(String(outcome)).toMatch(/No active model configured/)
       expect(c.stderr()).not.toContain("stdin is not a terminal")
     } finally {
-      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
-      else process.env.MINICODE_CONFIG_DIR = previous
+      if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+      else process.env.LOONGCODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
     }
   })

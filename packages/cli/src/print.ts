@@ -1,4 +1,4 @@
-import type { MiniCode, RunSummary, Session } from "@minicode/agent"
+import type { LoongCode, RunSummary, Session } from "@loongcode/agent"
 import { resultLine } from "./projection"
 
 /** Where the non-interactive application writes. */
@@ -17,7 +17,7 @@ export interface PrintIO {
  * reached a final answer (`stop`), `1` otherwise.
  */
 export async function runPrint(
-  agent: MiniCode,
+  agent: LoongCode,
   session: Session,
   task: string,
   jsonMode: boolean,
@@ -43,7 +43,7 @@ export async function runPrint(
       ? last.content.filter(part => part.type === "text").map(part => part.text).join("")
       : ""
     io.stdout(text + "\n")
-    if (result.error !== undefined) io.stderr(`minicode: ${result.error}\n`)
+    if (result.error !== undefined) io.stderr(`loongcode: ${result.error}\n`)
   }
   return result.finishReason === "stop" ? 0 : 1
 }

@@ -208,7 +208,7 @@ export async function restoreFiles(cwd: string, files: readonly FileChange[]): P
 
 /** Writes via a temporary file so a crash cannot leave a half-written file. */
 async function writeFileAtomically(absolute: string, content: string): Promise<void> {
-  const temp = `${absolute}.minicode-rewind-${crypto.randomUUID()}`
+  const temp = `${absolute}.loongcode-rewind-${crypto.randomUUID()}`
   await writeFile(temp, content, "utf-8")
   await rename(temp, absolute)
 }

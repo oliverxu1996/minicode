@@ -20,7 +20,7 @@ import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
 const MARKER = "SYSTEM-PROMPT-MARKER-7f3a91"
 
 function runDir(): string {
-  return mkdtempSync(join(tmpdir(), "minicode-sysprompt-"))
+  return mkdtempSync(join(tmpdir(), "loongcode-sysprompt-"))
 }
 
 /** OpenAI chunked SSE for a plain text answer. */
@@ -60,7 +60,7 @@ describe("system prompt delivery", () => {
         expect(body.system).toBeDefined()
         // The provider receives the whole prompt, marker included.
         expect(JSON.stringify(body.system)).toContain(MARKER)
-        expect(JSON.stringify(body.system)).toContain("You are MiniCode, an opinionated coding agent")
+        expect(JSON.stringify(body.system)).toContain("You are LoongCode, an opinionated coding agent")
         // Hoisted out of `messages`, so the conversation starts at the user.
         const messages = body.messages as { role: string }[]
         expect(messages[0]!.role).toBe("user")
@@ -88,7 +88,7 @@ describe("system prompt delivery", () => {
         const messages = body.messages as { role: string; content: unknown }[]
         expect(messages[0]!.role).toBe("system")
         expect(JSON.stringify(messages[0]!.content)).toContain(MARKER)
-        expect(JSON.stringify(messages[0]!.content)).toContain("You are MiniCode, an opinionated coding agent")
+        expect(JSON.stringify(messages[0]!.content)).toContain("You are LoongCode, an opinionated coding agent")
       } finally {
         await provider.close()
       }
@@ -199,7 +199,7 @@ describe("system prompt delivery", () => {
       // Nothing key-shaped.
       expect(system).not.toMatch(/sk-[A-Za-z0-9]|api[_-]?key|bearer\s|token=/i)
       // And it is the prompt content, nothing appended.
-      expect(system).toContain("You are MiniCode, an opinionated coding agent")
+      expect(system).toContain("You are LoongCode, an opinionated coding agent")
       expect(system).toContain("<env>")
     } finally {
       rmSync(dir, { recursive: true, force: true })

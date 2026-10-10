@@ -1,5 +1,5 @@
-import type { MiniCode, Session } from "@minicode/agent"
-import type { ModelMessage } from "@minicode/model"
+import type { LoongCode, Session } from "@loongcode/agent"
+import type { ModelMessage } from "@loongcode/model"
 
 /**
  * Session derivation operations for the `/session` manager.
@@ -36,7 +36,7 @@ export function forkCandidates(session: Session): ForkCandidate[] {
  * persists it. Mirrors `/fork`: the selected session is the parent, and only
  * the messages before the chosen cut point are copied.
  */
-export async function forkSession(agent: MiniCode, parent: Session, cut: number): Promise<Session> {
+export async function forkSession(agent: LoongCode, parent: Session, cut: number): Promise<Session> {
   const forked = agent.createSession(parent.cwd)
   forked.parentSessionId = parent.id
   await forked.replaceMessages(
@@ -49,7 +49,7 @@ export async function forkSession(agent: MiniCode, parent: Session, cut: number)
  * Creates a child copying `source`'s full history, then persists it. Mirrors
  * `/clone`.
  */
-export async function cloneSession(agent: MiniCode, source: Session): Promise<Session> {
+export async function cloneSession(agent: LoongCode, source: Session): Promise<Session> {
   const clone = agent.createSession(source.cwd)
   clone.parentSessionId = source.id
   await clone.replaceMessages(

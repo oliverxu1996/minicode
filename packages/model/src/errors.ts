@@ -14,7 +14,7 @@ export type ModelErrorCode =
   | "cancelled"
 
 /**
- * Error raised by `@minicode/model` for configuration, persistence, and
+ * Error raised by `@loongcode/model` for configuration, persistence, and
  * invocation failures.
  *
  * Messages never contain API keys, authorization headers, or other

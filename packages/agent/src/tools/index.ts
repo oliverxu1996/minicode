@@ -1,4 +1,4 @@
-import type { ModelTool } from "@minicode/model"
+import type { ModelTool } from "@loongcode/model"
 import type { Tool } from "./types"
 import { bashTool } from "./bash"
 import { editTool } from "./edit"
@@ -9,7 +9,7 @@ import { readTool } from "./read"
 import { writeTool } from "./write"
 
 /**
- * The fixed MiniCode v0.1 coding toolset: the seven tools a coding agent
+ * The fixed LoongCode v0.1 coding toolset: the seven tools a coding agent
  * needs to explore, modify, and verify a repository.
  */
 export const CODING_TOOLS: ReadonlyMap<string, Tool> = new Map([
@@ -22,7 +22,7 @@ export const CODING_TOOLS: ReadonlyMap<string, Tool> = new Map([
   ["bash", bashTool],
 ])
 
-/** The toolset as `@minicode/model` tool definitions, for a ModelRequest. */
+/** The toolset as `@loongcode/model` tool definitions, for a ModelRequest. */
 export function toModelTools(tools: ReadonlyMap<string, Tool>): ModelTool[] {
   return [...tools.entries()].map(([name, tool]) => ({
     name,

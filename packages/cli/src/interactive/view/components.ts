@@ -1,10 +1,10 @@
-import { Box, Container, Markdown, Spacer, Text, type Component } from "@minicode/tui"
-import type { SessionMessage } from "@minicode/agent"
+import { Box, Container, Markdown, Spacer, Text, type Component } from "@loongcode/tui"
+import type { SessionMessage } from "@loongcode/agent"
 import { ansi, markdownTheme, surface } from "./theme"
 import { formatDuration } from "../../projection"
 
 /**
- * MiniCode chat components for the runtime's message model.
+ * LoongCode chat components for the runtime's message model.
  */
 
 /** Maximum result lines kept per tool component (expanded rendering caps

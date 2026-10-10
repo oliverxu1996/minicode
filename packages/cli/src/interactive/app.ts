@@ -9,14 +9,14 @@ import {
 	type Terminal,
 	matchesKey,
 	type Component,
-} from "@minicode/tui"
+} from "@loongcode/tui"
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
-import type { ModelLimits, ModelMessage } from "@minicode/model"
-import type { Checkpoint, MiniCode, RewindNote, RunEvent, Session, SessionMessage } from "@minicode/agent"
-import { CheckpointStore } from "@minicode/agent"
-import { discardTurns, liveCheckpoints, recordRewind, rewindSession, summarizeRange, turnIndexOf, type CheckpointAdvance } from "@minicode/agent"
-import { configDir, listPromptTemplates, loadSettings } from "@minicode/agent"
+import type { ModelLimits, ModelMessage } from "@loongcode/model"
+import type { Checkpoint, LoongCode, RewindNote, RunEvent, Session, SessionMessage } from "@loongcode/agent"
+import { CheckpointStore } from "@loongcode/agent"
+import { discardTurns, liveCheckpoints, recordRewind, rewindSession, summarizeRange, turnIndexOf, type CheckpointAdvance } from "@loongcode/agent"
+import { configDir, listPromptTemplates, loadSettings } from "@loongcode/agent"
 import { ansi, markdownTheme } from "./view/theme"
 import {
 	NO_RUN_DISPLAY,
@@ -34,7 +34,7 @@ import { Selector, PickerSlot, pickerVisibleItems, type SelectorItem } from "./v
 import { SessionManager, type SessionManagerAction } from "./view/session-manager"
 import { workspaceSessions, type ScopedSessionSummary } from "./session/scope"
 import { cloneSession, forkCandidates, forkSession } from "./session/operations"
-import { MiniCodeAutocomplete } from "./input/autocomplete"
+import { LoongCodeAutocomplete } from "./input/autocomplete"
 import { argumentPlaceholderFor } from "./input/argument-placeholder"
 import { altEnterAsNewline } from "./input/alt-enter"
 import { expandFileReferences } from "./input/expand"
@@ -48,8 +48,8 @@ import {
 	userMessage,
 } from "./view/components"
 
-export interface MiniCodeTuiOptions {
-	agent: MiniCode
+export interface LoongCodeTuiOptions {
+	agent: LoongCode
 	session: Session
 	/** Window title / header label (typically the workspace path). */
 	label?: string
@@ -76,7 +76,7 @@ export type SlashInput =
  */
 function readPromptTemplate(cwd: string, name: string): string | null {
 	const userDir = join(configDir(), "prompts")
-	for (const dir of [join(cwd, ".minicode", "prompts"), userDir]) {
+	for (const dir of [join(cwd, ".loongcode", "prompts"), userDir]) {
 		try {
 			return readFileSync(join(dir, `${name}.md`), "utf-8")
 		} catch {
@@ -117,9 +117,9 @@ interface AskState {
 }
 
 /**
- * The MiniCode fullscreen TUI.
+ * The LoongCode fullscreen TUI.
  * The runtime is the source of truth: `RunEvent`s map 1:1 onto component
- * updates and the editor submits through the existing `MiniCode.run()`.
+ * updates and the editor submits through the existing `LoongCode.run()`.
  *
  * The conversation lives in an application-owned `ScrollView` (the only
  * scrolling region); the status, composer, and two footer rows are fixed to the
@@ -209,7 +209,7 @@ function truncateForRow(text: string): string {
 	return flat.length <= 72 ? flat : `${flat.slice(0, 71)}…`
 }
 
-export class MiniCodeTui {
+export class LoongCodeTui {
 	private readonly tui: TuiAltScreen
 	private readonly chat = new Container()
 	/** File checkpoints for `/rewind`, stored beside the session. */
@@ -263,7 +263,7 @@ export class MiniCodeTui {
 	private reasoning: Container | null = null
 	private readonly commandContext: CommandContext
 
-	constructor(private readonly options: MiniCodeTuiOptions) {
+	constructor(private readonly options: LoongCodeTuiOptions) {
 		this.checkpointStore = new CheckpointStore(options.agent.sessionsDir)
 		// A fullscreen viewport owns the screen: the conversation scrolls in-app
 		// while the composer/status/footer stay pinned to the bottom.
@@ -414,7 +414,7 @@ export class MiniCodeTui {
 				if (busy !== undefined) return { status: "busy", reason: busy }
 				const model = await this.options.agent.currentModel()
 				if (model === undefined) return { status: "no-model" }
-				const { Compactor } = await import("@minicode/agent")
+				const { Compactor } = await import("@loongcode/agent")
 				const compactor = new Compactor(model, model.limits.contextWindow)
 				// `runCompaction` brackets the awaited model call; its `finally`
 				// guarantees the state and spinner are cleared on success, failure,
@@ -490,7 +490,7 @@ export class MiniCodeTui {
 			},
 			{ ghostTextStyle: (text) => ansi.gray(text) },
 		)
-		editor.setAutocompleteProvider(new MiniCodeAutocomplete(
+		editor.setAutocompleteProvider(new LoongCodeAutocomplete(
 			() => autocompleteItems(this.session.cwd),
 			() => this.session.cwd,
 		))

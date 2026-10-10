@@ -6,7 +6,7 @@
  * settle path; these tests exercise the bracket directly, with a fake compactor.
  */
 import { describe, expect, test } from "bun:test"
-import type { CompactionOutcome, Session } from "@minicode/agent"
+import type { CompactionOutcome, Session } from "@loongcode/agent"
 import { runCompaction, type CompactionObserver } from "./compaction"
 
 const SESSION = {} as Session

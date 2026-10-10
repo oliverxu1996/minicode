@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ModelAssistantPart, ModelToolResult } from "@minicode/model"
+import type { ModelAssistantPart, ModelToolResult } from "@loongcode/model"
 import { executeTool } from "../../src/loop/execute"
 import { isPrunedToolOutput } from "../../src/context/projection"
 import { Session } from "../../src/session/session"
@@ -21,7 +21,7 @@ import type { Tool, ToolResult } from "../../src/tools/types"
 const THRESHOLD = 2048 // the canonical cap; this work deliberately does not change it.
 
 function tempCwd(): { cwd: string; cleanup: () => void } {
-  const cwd = mkdtempSync(join(tmpdir(), "minicode-tool-boundary-"))
+  const cwd = mkdtempSync(join(tmpdir(), "loongcode-tool-boundary-"))
   return { cwd, cleanup: () => rmSync(cwd, { recursive: true, force: true }) }
 }
 

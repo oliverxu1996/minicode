@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
-import { configDir, copyLegacyConfigIfNeeded } from "../../src/config/dir"
+import { configDir } from "../../src/config/dir"
 import { loadSettings, projectSettingsPath, globalSettingsPath } from "../../src/config/settings"
 import { formatProjectInstructions, loadProjectContext } from "../../src/config/context"
 import { loadResources, listPromptTemplates } from "../../src/config/resources"
 
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), "minicode-product-test-"))
+  return mkdtempSync(join(tmpdir(), "loongcode-product-test-"))
 }
 
 describe("settings (AC10)", () => {
@@ -24,13 +24,13 @@ describe("settings (AC10)", () => {
 
   test("project settings override global settings with deep merge", () => {
     const dir = tempDir()
-    const previous = process.env.MINICODE_CONFIG_DIR
-    process.env.MINICODE_CONFIG_DIR = dir
+    const previous = process.env.LOONGCODE_CONFIG_DIR
+    process.env.LOONGCODE_CONFIG_DIR = dir
     try {
       const globalPath = globalSettingsPath()
       const projectPath = projectSettingsPath(dir)
       mkdirSync(dir, { recursive: true })
-      mkdirSync(join(dir, ".minicode"), { recursive: true })
+      mkdirSync(join(dir, ".loongcode"), { recursive: true })
       mkdirSync(globalSettingsPath().replace("/settings.json", ""), { recursive: true })
       writeFileSync(globalPath, JSON.stringify({ autoCompact: { enabled: true, thresholdPct: 90 } }))
       mkdirSync(dir, { recursive: true })
@@ -43,23 +43,23 @@ describe("settings (AC10)", () => {
       expect(loaded.settings.autoCompact?.enabled).toBe(true)
       expect(loaded.settings.model).toBe("mine")
     } finally {
-      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
-      else process.env.MINICODE_CONFIG_DIR = previous
+      if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+      else process.env.LOONGCODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
   test("malformed settings throw with the file path", () => {
     const dir = tempDir()
-    const previous = process.env.MINICODE_CONFIG_DIR
-    process.env.MINICODE_CONFIG_DIR = dir
+    const previous = process.env.LOONGCODE_CONFIG_DIR
+    process.env.LOONGCODE_CONFIG_DIR = dir
     try {
       mkdirSync(dir, { recursive: true })
       writeFileSync(globalSettingsPath(), "{ broken")
       expect(() => loadSettings(dir)).toThrow(/malformed|invalid settings file/)
     } finally {
-      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
-      else process.env.MINICODE_CONFIG_DIR = previous
+      if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+      else process.env.LOONGCODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -89,7 +89,7 @@ describe("project context (AC9)", () => {
 describe("resources (AC13/AC17)", () => {
   test("project prompts load without any trust state", () => {
     const dir = tempDir()
-    const promptsDir = join(dir, ".minicode", "prompts")
+    const promptsDir = join(dir, ".loongcode", "prompts")
     mkdirSync(promptsDir, { recursive: true })
     writeFileSync(join(promptsDir, "review.md"), "Review the diff carefully.")
 
@@ -100,7 +100,7 @@ describe("resources (AC13/AC17)", () => {
 
   test("project skills load without any trust state", () => {
     const dir = tempDir()
-    const skillDir = join(dir, ".minicode", "skills", "demo")
+    const skillDir = join(dir, ".loongcode", "skills", "demo")
     mkdirSync(skillDir, { recursive: true })
     const content = "description: Demo skill\n\nDo the demo thing.\n"
     writeFileSync(join(skillDir, "SKILL.md"), content)
@@ -112,8 +112,8 @@ describe("resources (AC13/AC17)", () => {
 
   test("global prompts and skills still load", () => {
     const dir = tempDir()
-    const previous = process.env.MINICODE_CONFIG_DIR
-    process.env.MINICODE_CONFIG_DIR = dir
+    const previous = process.env.LOONGCODE_CONFIG_DIR
+    process.env.LOONGCODE_CONFIG_DIR = dir
     try {
       const promptsDir = join(dir, "prompts")
       mkdirSync(promptsDir, { recursive: true })
@@ -129,8 +129,8 @@ describe("resources (AC13/AC17)", () => {
         { name: "daily", description: "Daily skill", content: skillContent, source: "user" },
       ])
     } finally {
-      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
-      else process.env.MINICODE_CONFIG_DIR = previous
+      if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+      else process.env.LOONGCODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -138,10 +138,10 @@ describe("resources (AC13/AC17)", () => {
   test("listPromptTemplates lists names and sources without reading contents, live", () => {
     const dir = tempDir()
     const userDir = tempDir()
-    const previous = process.env.MINICODE_CONFIG_DIR
-    process.env.MINICODE_CONFIG_DIR = userDir
+    const previous = process.env.LOONGCODE_CONFIG_DIR
+    process.env.LOONGCODE_CONFIG_DIR = userDir
     try {
-      const projectPrompts = join(dir, ".minicode", "prompts")
+      const projectPrompts = join(dir, ".loongcode", "prompts")
       mkdirSync(projectPrompts, { recursive: true })
       writeFileSync(join(projectPrompts, "review.md"), "Review the diff.")
       const userPrompts = join(userDir, "prompts")
@@ -160,8 +160,8 @@ describe("resources (AC13/AC17)", () => {
       rmSync(join(projectPrompts, "review.md"))
       expect(listPromptTemplates(dir).map(t => t.name)).not.toContain("review")
     } finally {
-      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
-      else process.env.MINICODE_CONFIG_DIR = previous
+      if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+      else process.env.LOONGCODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
       rmSync(userDir, { recursive: true, force: true })
     }
@@ -170,81 +170,55 @@ describe("resources (AC13/AC17)", () => {
   test("listPromptTemplates ignores non-markdown entries and directories", () => {
     const dir = tempDir()
     const userDir = tempDir()
-    const previous = process.env.MINICODE_CONFIG_DIR
-    process.env.MINICODE_CONFIG_DIR = userDir
+    const previous = process.env.LOONGCODE_CONFIG_DIR
+    process.env.LOONGCODE_CONFIG_DIR = userDir
     try {
-      const projectPrompts = join(dir, ".minicode", "prompts")
+      const projectPrompts = join(dir, ".loongcode", "prompts")
       mkdirSync(join(projectPrompts, "not-a-template.md"), { recursive: true })
       writeFileSync(join(projectPrompts, "notes.txt"), "not markdown")
       writeFileSync(join(projectPrompts, "real.md"), "real")
       expect(listPromptTemplates(dir)).toEqual([{ name: "real", source: "project" }])
     } finally {
-      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
-      else process.env.MINICODE_CONFIG_DIR = previous
+      if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+      else process.env.LOONGCODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
       rmSync(userDir, { recursive: true, force: true })
     }
   })
 })
 
-describe("user config directory (~/.minicode)", () => {
-  test("configDir honors MINICODE_CONFIG_DIR", () => {
+describe("user config directory (~/.loongcode)", () => {
+  test("configDir honors LOONGCODE_CONFIG_DIR", () => {
     const dir = tempDir()
-    const previous = process.env.MINICODE_CONFIG_DIR
-    process.env.MINICODE_CONFIG_DIR = dir
+    const previous = process.env.LOONGCODE_CONFIG_DIR
+    process.env.LOONGCODE_CONFIG_DIR = dir
     try {
       expect(configDir()).toBe(dir)
     } finally {
-      if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
-      else process.env.MINICODE_CONFIG_DIR = previous
+      if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+      else process.env.LOONGCODE_CONFIG_DIR = previous
       rmSync(dir, { recursive: true, force: true })
     }
   })
+})
 
-  test("a legacy tree is copied into the new dir and the original is left untouched", () => {
-    const from = tempDir()
-    const to = join(tempDir(), ".minicode")
+describe("the agent config root", () => {
+  test("defaults to ~/.loongcode and honours the override", () => {
+    const previous = process.env.LOONGCODE_CONFIG_DIR
     try {
-      mkdirSync(join(from, "sessions"), { recursive: true })
-      writeFileSync(join(from, "models.json"), '{"version":1,"models":[],"activeModelId":null}')
-      writeFileSync(join(from, "sessions", "s.json"), "{}")
+      // The default: no override, no filesystem access — just the path.
+      // `@loongcode/model` resolves the same directory independently (its
+      // package test pins the same literal), which is what makes one root
+      // out of two resolvers.
+      delete process.env.LOONGCODE_CONFIG_DIR
+      expect(configDir()).toBe(join(homedir(), ".loongcode"))
 
-      copyLegacyConfigIfNeeded(from, to)
-
-      expect(readFileSync(join(to, "models.json"), "utf-8")).toContain('"version":1')
-      expect(existsSync(join(to, "sessions", "s.json"))).toBe(true)
-      // Non-destructive: the source survives.
-      expect(existsSync(join(from, "models.json"))).toBe(true)
+      // And the override redirects it.
+      process.env.LOONGCODE_CONFIG_DIR = "/tmp/loongcode-root-probe"
+      expect(configDir()).toBe("/tmp/loongcode-root-probe")
     } finally {
-      rmSync(from, { recursive: true, force: true })
-      rmSync(to, { recursive: true, force: true })
-    }
-  })
-
-  test("migration is a no-op when the target already exists", () => {
-    const from = tempDir()
-    const to = tempDir()
-    try {
-      writeFileSync(join(from, "models.json"), "legacy")
-      writeFileSync(join(to, "models.json"), "current")
-
-      copyLegacyConfigIfNeeded(from, to)
-
-      // The existing target wins — migration never overwrites it.
-      expect(readFileSync(join(to, "models.json"), "utf-8")).toBe("current")
-    } finally {
-      rmSync(from, { recursive: true, force: true })
-      rmSync(to, { recursive: true, force: true })
-    }
-  })
-
-  test("migration is a no-op when there is no legacy tree", () => {
-    const to = join(tempDir(), ".minicode")
-    try {
-      copyLegacyConfigIfNeeded(join(tmpdir(), "minicode-does-not-exist-xyz"), to)
-      expect(existsSync(to)).toBe(false)
-    } finally {
-      rmSync(to, { recursive: true, force: true })
+      if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+      else process.env.LOONGCODE_CONFIG_DIR = previous
     }
   })
 })

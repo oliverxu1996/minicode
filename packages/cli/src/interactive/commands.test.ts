@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { MiniCode } from "@minicode/agent"
-import type { ModelConfig } from "@minicode/model"
+import { LoongCode } from "@loongcode/agent"
+import type { ModelConfig } from "@loongcode/model"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { COMMANDS, findCommand, type CommandContext, type CompactResult } from "./commands"
-import { MiniCodeAutocomplete } from "./input/autocomplete"
+import { LoongCodeAutocomplete } from "./input/autocomplete"
 
 describe("commands (AC12)", () => {
   test("core commands exist with descriptions", () => {
@@ -63,7 +63,7 @@ describe("commands (AC12)", () => {
   })
 
   test("autocomplete proposes the consolidated surface and nothing removed", async () => {
-    const provider = new MiniCodeAutocomplete(
+    const provider = new LoongCodeAutocomplete(
       () => COMMANDS.map(command => ({ name: command.name, description: command.description })),
       () => process.cwd(),
     )
@@ -88,7 +88,7 @@ describe("commands (AC12)", () => {
       expect(help).not.toContain(name)
     }
 
-    const provider = new MiniCodeAutocomplete(
+    const provider = new LoongCodeAutocomplete(
       () => COMMANDS.map(command => ({ name: command.name, description: command.description })),
       () => process.cwd(),
     )
@@ -144,7 +144,7 @@ describe("commands (AC12)", () => {
   })
 
   test("autocomplete proposes /model and never advertises subcommands", async () => {
-    const provider = new MiniCodeAutocomplete(
+    const provider = new LoongCodeAutocomplete(
       () => COMMANDS.map(command => ({ name: command.name, description: command.description })),
       () => process.cwd(),
     )
@@ -543,8 +543,8 @@ describe("wizard cancellation", () => {
 // ── real persistence through the runtime bridge ──────────────────────
 
 /**
- * Runs a scripted `/model` against a real MiniCode agent (real ModelManager,
- * a real `models.json` under a temp `MINICODE_CONFIG_DIR`), so selection and
+ * Runs a scripted `/model` against a real LoongCode agent (real ModelManager,
+ * a real `models.json` under a temp `LOONGCODE_CONFIG_DIR`), so selection and
  * addition are proven to persist through the actual runtime bridge rather than
  * a fake.
  */
@@ -553,15 +553,15 @@ async function withRealModelConfig(
   io: { pick?: (call: PickCall, index: number) => string | null; asks?: Array<string | null> },
   run: (ctx: CommandContext, notices: Array<{ text: string; isError: boolean }>, dir: string) => Promise<void>,
 ): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "minicode-cli-model-"))
-  const previous = process.env.MINICODE_CONFIG_DIR
-  process.env.MINICODE_CONFIG_DIR = dir
+  const dir = mkdtempSync(join(tmpdir(), "loongcode-cli-model-"))
+  const previous = process.env.LOONGCODE_CONFIG_DIR
+  process.env.LOONGCODE_CONFIG_DIR = dir
   try {
     seed(dir)
     const notices: Array<{ text: string; isError: boolean }> = []
     const asks = [...(io.asks ?? [])]
     let pickCall = 0
-    const agent = new MiniCode()
+    const agent = new LoongCode()
     const ctx = {
       agent: () => agent,
       notify: (text: string, isError?: boolean) => { notices.push({ text, isError: isError === true }) },
@@ -575,8 +575,8 @@ async function withRealModelConfig(
     } as unknown as CommandContext
     await run(ctx, notices, dir)
   } finally {
-    if (previous === undefined) delete process.env.MINICODE_CONFIG_DIR
-    else process.env.MINICODE_CONFIG_DIR = previous
+    if (previous === undefined) delete process.env.LOONGCODE_CONFIG_DIR
+    else process.env.LOONGCODE_CONFIG_DIR = previous
     rmSync(dir, { recursive: true, force: true })
   }
 }

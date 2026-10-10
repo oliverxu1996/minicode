@@ -6,12 +6,12 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { ModelError } from "@minicode/model"
+import { ModelError } from "@loongcode/model"
 import type { RunEvent } from "../../src/loop/events"
 import type { RunSummary } from "../../src/session/types"
 import { FakeModel, textResponse, toolCallResponse } from "../support/testing"
 import { agentFor } from "../support/loop"
-import { MiniCode } from "../../src/minicode"
+import { LoongCode } from "../../src/loongcode"
 
 describe("Run record (O2)", () => {
   test("a completed run records identity, timing, counts and usage", async () => {
@@ -120,7 +120,7 @@ describe("Run record (O2)", () => {
     expect(second.usage).toEqual({ inputTokens: 200, outputTokens: 20 })
 
     // Through a fresh runtime root, as a restarted process would read it.
-    const fresh = new MiniCode({ sessionsDir: join(dir, "sessions"), model })
+    const fresh = new LoongCode({ sessionsDir: join(dir, "sessions"), model })
     const reloaded = await fresh.loadSession(session.id)
     expect(reloaded.runs).toEqual(session.runs)
     cleanup()

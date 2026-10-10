@@ -5,8 +5,8 @@ import type {
   ModelResponse,
   ModelToolCall,
   ModelUsage,
-} from "@minicode/model"
-import { ModelError } from "@minicode/model"
+} from "@loongcode/model"
+import { ModelError } from "@loongcode/model"
 import type { Skill } from "../config/resources"
 import { contextBudget } from "../context/budget"
 import type { PruneStats } from "../context/projection"
@@ -89,7 +89,7 @@ function abortableDelay(ms: number, signal?: AbortSignal): Promise<boolean> {
  * - model errors end the run; context_exceeded compacts once and retries
  * - tool failures never terminate the run — the model sees them as results
  *
- * The model is the `@minicode/model` boundary: no provider or SDK type
+ * The model is the `@loongcode/model` boundary: no provider or SDK type
  * appears here.
  */
 export class AgentLoop {

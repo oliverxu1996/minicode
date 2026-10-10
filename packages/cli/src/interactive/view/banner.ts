@@ -1,4 +1,4 @@
-import type { Component } from "@minicode/tui"
+import type { Component } from "@loongcode/tui"
 import { displayWidth, truncatePlain } from "../../projection"
 import { ansi } from "./theme"
 
@@ -22,24 +22,37 @@ import { ansi } from "./theme"
  * wordmarks are 47 and 33 columns; the single-line fallback is 8.
  */
 
-/** The full 5-row MINICODE wordmark (47 columns). Every non-space glyph is one cell wide. */
+/**
+ * The full 5-row LOONGCODE wordmark (53 columns).
+ *
+ * Drawn as nine 5-wide glyphs joined by one space, in the same letterforms the
+ * wordmark has always used: every shared glyph (O, N, C, D, E) is carried over
+ * unchanged, and only L and G are new. Every non-space glyph is one cell wide.
+ */
 export const WORDMARK_5: readonly string[] = [
-	"█   █ █████ █   █ █████  ████  ███  ████  █████",
-	"██ ██   █   ██  █   █   █     █   █ █   █ █    ",
-	"█ █ █   █   █ █ █   █   █     █   █ █   █ ███  ",
-	"█   █   █   █  ██   █   █     █   █ █   █ █    ",
-	"█   █ █████ █   █ █████  ████  ███  ████  █████",
+	"█      ███   ███  █   █  ████  ████  ███  ████  █████",
+	"█     █   █ █   █ ██  █ █     █     █   █ █   █ █    ",
+	"█     █   █ █   █ █ █ █ █  ██ █     █   █ █   █ ███  ",
+	"█     █   █ █   █ █  ██ █   █ █     █   █ █   █ █    ",
+	"█████  ███   ███  █   █  ████  ████  ███  ████  █████",
 ]
 
-/** The compact 3-row MINICODE wordmark (33 columns). Every non-space glyph is one cell wide. */
+/**
+ * The compact 3-row LOONGCODE wordmark (37 columns).
+ *
+ * The same nine letters in three rows. N and G take a 4-wide cell — the 3-row
+ * font has always widened the letters that need it (M and N before it) — which
+ * is what gives G room for the spur that keeps it distinct from C and O. Every
+ * non-space glyph is one cell wide.
+ */
 export const WORDMARK_3: readonly string[] = [
-	"█▄▄█ ███ █  █ ███ ███ ███ ██  ███",
-	"█  █  █  ██ █  █  █   █ █ █ █ ██ ",
-	"█  █ ███ █ ██ ███ ███ ███ ██  ███",
+	"█   ███ ███ █  █ ███▄ ███ ███ ██  ███",
+	"█   █ █ █ █ ██ █ █  █ █   █ █ █ █ ██ ",
+	"███ ███ ███ █ ██ ████ ███ ███ ██  ███",
 ]
 
-/** The single-line fallback wordmark (8 columns). */
-const WORDMARK_SINGLE = "MINICODE"
+/** The single-line fallback wordmark (9 columns). */
+const WORDMARK_SINGLE = "LOONGCODE"
 
 /** The product descriptor shown beneath the wordmark (27 columns). */
 export const DESCRIPTOR = "an opinionated coding agent"
@@ -48,8 +61,8 @@ export const DESCRIPTOR = "an opinionated coding agent"
 export const KEYBOARD_HINTS =
 	"enter submit · alt+enter newline · esc interrupt · ctrl+c clear (twice exits) · ctrl+d exit · ctrl+o tools · ctrl+p model · pageup/pagedown scroll · /help commands"
 
-const WORDMARK_5_WIDTH = 47
-const WORDMARK_3_WIDTH = 33
+const WORDMARK_5_WIDTH = 53
+const WORDMARK_3_WIDTH = 37
 
 /** Blank columns kept on each side when a multi-row wordmark is centered. */
 const SIDE_MARGIN = 2

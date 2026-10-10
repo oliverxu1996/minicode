@@ -101,7 +101,7 @@ describe("openai protocol: generate", () => {
         const model = await activeModelViaManager(testConfig({ endpoint: provider.url }))
         await model.generate({
           messages: [
-            { role: "system", content: "You are MiniCode." },
+            { role: "system", content: "You are LoongCode." },
             { role: "user", content: "hi" },
             { role: "assistant", content: [{ type: "text", text: "hello" }] },
             { role: "user", content: "back" },
@@ -112,7 +112,7 @@ describe("openai protocol: generate", () => {
 
         expect(captured?.path).toBe("/chat/completions")
         expect(captured?.body.messages).toEqual([
-          { role: "system", content: "You are MiniCode." },
+          { role: "system", content: "You are LoongCode." },
           { role: "user", content: "hi" },
           { role: "assistant", content: "hello" },
           { role: "user", content: "back" },

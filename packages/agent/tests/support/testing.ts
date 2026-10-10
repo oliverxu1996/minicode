@@ -1,11 +1,11 @@
-import { ModelError } from "@minicode/model"
+import { ModelError } from "@loongcode/model"
 import type {
   Model,
   ModelEvent,
   ModelRequest,
   ModelResponse,
   ModelToolCall,
-} from "@minicode/model"
+} from "@loongcode/model"
 import { estimateTokens } from "../../src/context/budget"
 
 export type ScriptedResponse =

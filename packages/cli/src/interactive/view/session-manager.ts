@@ -1,4 +1,4 @@
-import { Box, Container, TruncatedText, type Component } from "@minicode/tui"
+import { Box, Container, TruncatedText, type Component } from "@loongcode/tui"
 import { ansi, surface } from "./theme"
 import { filterSessions, relatedSessions, type ScopedSessionSummary } from "../session/scope"
 

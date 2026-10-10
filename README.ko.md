@@ -1,19 +1,19 @@
-# MiniCode
+# LoongCode
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [한국어](README.ko.md) | [日本語](README.ja.md)
 
-MiniCode는 여러분의 저장소 안에서 직접 작동하도록 설계된 코딩 에이전트입니다. 실패하는 테스트 수정, 모듈 리팩토링, 버그 원인 추적 같은 소프트웨어 작업을 MiniCode에 맡기면, 코드를 살펴보고 변경을 가하고, 명령을 실행하며, 결과를 스스로 검증합니다. 이 모든 과정은 터미널에서 실시간으로 확인할 수 있고, 언제든 방향을 지시할 수 있습니다.
+LoongCode는 여러분의 저장소 안에서 직접 작동하도록 설계된 코딩 에이전트입니다. 실패하는 테스트 수정, 모듈 리팩토링, 버그 원인 추적 같은 소프트웨어 작업을 LoongCode에 맡기면, 코드를 살펴보고 변경을 가하고, 명령을 실행하며, 결과를 스스로 검증합니다. 이 모든 과정은 터미널에서 실시간으로 확인할 수 있고, 언제든 방향을 지시할 수 있습니다.
 
-MiniCode는 의도적으로 집중도를 높였습니다. 범용 AI 어시스턴트가 아니라, 소프트웨어 엔지니어링 작업을 실제로 수행하기 위한 도구입니다.
+LoongCode는 의도적으로 집중도를 높였습니다. 범용 AI 어시스턴트가 아니라, 소프트웨어 엔지니어링 작업을 실제로 수행하기 위한 도구입니다.
 
 ## 무엇을 할 수 있나요?
 
-MiniCode에 작업을 맡기면 다음이 가능합니다.
+LoongCode에 작업을 맡기면 다음이 가능합니다.
 
 - 낯선 저장소 탐색 — 파일과 코드 목록 조회, 검색, 내용 확인
 - 줄 번호와 페이징이 있는 파일 읽기, diff로 검토 가능한 안전한 편집
 - 새 파일 생성과 셸 명령 실행 (테스트, 빌드, git 등 무엇이든)
-- 실패하는 테스트와 깨진 빌드에 대응 — 실패는 정보이며, MiniCode는 수복과 재검증을 반복합니다
+- 실패하는 테스트와 깨진 빌드에 대응 — 실패는 정보이며, LoongCode는 수복과 재검증을 반복합니다
 - 작업이 끝나거나 도움이 필요해질 때까지 독자적으로 여러 번의 이터레이션을 진행
 - 진행 중인 모든 작업을 터미널에 실시간으로 표시
 
@@ -22,7 +22,7 @@ MiniCode에 작업을 맡기면 다음이 가능합니다.
 ```text
 당신:  이 저장소에서 실패하는 테스트를 수정해 줘.
 
-MiniCode:
+LoongCode:
   ▸ read src/math.ts
   ✓ read src/math.ts
   ▸ bash bun test math.test.ts
@@ -37,16 +37,16 @@ MiniCode:
 
 주도권은 항상 사용자에게 있습니다. 언제든 중단할 수 있고, 작업 중에 메시지를 입력해 에이전트의 방향을 바꿀 수도 있습니다.
 
-## 왜 MiniCode인가?
+## 왜 LoongCode인가?
 
-코딩 에이전트는 코드를 한 줄 바꾸기도 전에 탐색과 실행 — 파일 읽기, 검색, 재독립, 재시도 — 에 많은 노력을 소모합니다. MiniCode는 이 루프가 잘 작동하도록 만들어졌습니다.
+코딩 에이전트는 코드를 한 줄 바꾸기도 전에 탐색과 실행 — 파일 읽기, 검색, 재독립, 재시도 — 에 많은 노력을 소모합니다. LoongCode는 이 루프가 잘 작동하도록 만들어졌습니다.
 
 - 에이전트는 저장소의 "설명"이 아니라 실제 저장소 상태를 대상으로 반복 작업을 수행합니다
 - 코딩 루프는 보이고 조종할 수 있습니다 — 에이전트가 하는 일을 보고, 작업 중에도 방향을 바꿀 수 있습니다
 - 검증은 워크플로의 일부입니다. 성공을 주장하는 대신 테스트를 실행해 변경을 증명해야 합니다
 - 컨텍스트는 의도적으로 관리되어, 긴 세션도 조용히 넘쳐흐르지 않고 요약됩니다
 
-MiniCode는 소프트웨어 개발에 집중합니다. 범용 AI 어시스턴트가 되려 하지 않습니다.
+LoongCode는 소프트웨어 개발에 집중합니다. 범용 AI 어시스턴트가 되려 하지 않습니다.
 
 ## 빠른 시작
 
@@ -54,12 +54,12 @@ MiniCode는 소프트웨어 개발에 집중합니다. 범용 AI 어시스턴트
 
 ### 독립 실행 바이너리 (Linux x86_64)
 
-[릴리스 페이지](https://github.com/oliverxu1996/minicode/releases)에서 `minicode-linux-x64`를 내려받습니다:
+[릴리스 페이지](https://github.com/oliverxu1996/LoongCode/releases)에서 `loongcode-linux-x64`를 내려받습니다:
 
 ```sh
-chmod +x minicode-linux-x64
+chmod +x loongcode-linux-x64
 cd ~/my-project
-/path/to/minicode-linux-x64
+/path/to/loongcode-linux-x64
 ```
 
 이 바이너리는 자체 완결형이라 Bun이나 Node를 설치할 필요가 없습니다. 현재 사전 빌드된 바이너리를 제공하는 플랫폼은 Linux x86_64뿐입니다.
@@ -69,23 +69,23 @@ cd ~/my-project
 **전제 조건:** [Bun](https://bun.sh)이 설치되어 PATH에서 사용 가능해야 합니다.
 
 ```sh
-npm install -g @minicode/cli
+npm install -g @loongcode/cli
 cd ~/my-project
-minicode
+loongcode
 ```
 
 첫 실행 시 모델이 설정되어 있지 않으면 `/model`로 설정한 후 작업을 입력합니다.
 
 ### 소스에서 실행
 
-MiniCode 자체를 개발하려면 체크아웃에서 실행합니다:
+LoongCode 자체를 개발하려면 체크아웃에서 실행합니다:
 
 ```sh
-git clone https://github.com/oliverxu1996/minicode.git
-cd minicode
+git clone https://github.com/oliverxu1996/LoongCode.git
+cd LoongCode
 bun install
 
-# 프로젝트에서 MiniCode 시작
+# 프로젝트에서 LoongCode 시작
 bun ./packages/cli/src/main.ts /path/to/your/project
 ```
 
@@ -95,7 +95,7 @@ bun ./packages/cli/src/main.ts /path/to/your/project
 
 ## 모델 설정
 
-MiniCode는 두 가지 프로토콜을 지원합니다. 공식 API와 호환 가능한 모든 엔드포인트에서 동작합니다.
+LoongCode는 두 가지 프로토콜을 지원합니다. 공식 API와 호환 가능한 모든 엔드포인트에서 동작합니다.
 
 | 프로토콜 | 주요 용도 |
 | --- | --- |
@@ -112,7 +112,7 @@ MiniCode는 두 가지 프로토콜을 지원합니다. 공식 API와 호환 가
 `/model`은 유일한 대화형 모델 화면입니다. 모델 추가 시 프로토콜, 엔드포인트, 프로바이더 모델, API 키를 묻고, 컨텍스트 창과 최대 출력 토큰에는 적절한 기본값이 적용됩니다(선택적 `Configure limits…` 단계에서 변경 가능).
 
 설정은 로컬 설정 디렉터리에 저장됩니다
-(`~/.minicode/models.json`). 이 파일을 직접 편집할 수도 있습니다.
+(`~/.loongcode/models.json`). 이 파일을 직접 편집할 수도 있습니다.
 
 ## 에이전트와 함께 작업하기
 
@@ -127,7 +127,7 @@ MiniCode는 두 가지 프로토콜을 지원합니다. 공식 API와 호환 가
 
 작업 내용은 자동으로 저장됩니다. 종료했다가 나중에 돌아와도 — `--continue`로 워크스페이스의 최근 세션을 이어가고, `--resume <id>`로 특정 세션을 복원할 수 있습니다. TUI 안의 `/session`은 이 워크스페이스의 세션을 관리하는 대화형 관리자를 열며, 열기·검색·이름 변경·삭제·분기·복제·관련 세션 탐색을 할 수 있습니다.
 
-작업 중에 MiniCode가 중단되면, 다음 시작 시 중단된 작업을 자동으로 조정합니다. 완료된 단계는 유지되고, 완료되지 않은 단계는 있는 그대로 보고되며, 멈춘 지점에서 계속할 수 있습니다.
+작업 중에 LoongCode가 중단되면, 다음 시작 시 중단된 작업을 자동으로 조정합니다. 완료된 단계는 유지되고, 완료되지 않은 단계는 있는 그대로 보고되며, 멈춘 지점에서 계속할 수 있습니다.
 
 ### 슬래시 명령
 
@@ -143,7 +143,7 @@ MiniCode는 두 가지 프로토콜을 지원합니다. 공식 API와 호환 가
 
 ## 프로젝트 지침
 
-MiniCode는 저장소 루트의 지시 파일을 읽어 작업 시작 전에 프로젝트의 규칙을 파악합니다.
+LoongCode는 저장소 루트의 지시 파일을 읽어 작업 시작 전에 프로젝트의 규칙을 파악합니다.
 
 - `AGENTS.override.md` — 있으면 최우선 적용
 - `AGENTS.md`
@@ -151,7 +151,7 @@ MiniCode는 저장소 루트의 지시 파일을 읽어 작업 시작 전에 프
 
 가장 먼저 발견된 파일이 에이전트의 시스템 프롬프트에 로드되므로, 첫 메시지부터 프로젝트의 규칙을 따릅니다.
 
-프로젝트 로컬 **프롬프트 템플릿**(`.minicode/prompts/*.md`)과 **스킬**(`.minicode/skills/<name>/SKILL.md`)을 추가할 수도 있습니다. 이들은 자동으로 로드됩니다. 전역 설정은 `~/.minicode/settings.json`에 있으며 프로젝트의 `.minicode/settings.json`으로 재정의할 수 있습니다.
+프로젝트 로컬 **프롬프트 템플릿**(`.loongcode/prompts/*.md`)과 **스킬**(`.loongcode/skills/<name>/SKILL.md`)을 추가할 수도 있습니다. 이들은 자동으로 로드됩니다. 전역 설정은 `~/.loongcode/settings.json`에 있으며 프로젝트의 `.loongcode/settings.json`으로 재정의할 수 있습니다.
 
 ## 스크립트와 자동화
 
@@ -159,18 +159,18 @@ MiniCode는 저장소 루트의 지시 파일을 읽어 작업 시작 전에 프
 
 ```sh
 # 작업 하나를 실행하고 최종 응답 출력
-minicode -p "이 프로젝트가 하는 일을 설명해 줘" /path/to/project
+loongcode -p "이 프로젝트가 하는 일을 설명해 줘" /path/to/project
 
 # 모든 런타임 이벤트를 JSON 라인으로 출력 (도구 연동용)
-minicode --mode json -p "모든 TODO 주석을 찾아 줘" /path/to/project
+loongcode --mode json -p "모든 TODO 주석을 찾아 줘" /path/to/project
 
 # 이 워크스페이스의 최근 세션 계속하기
-minicode -c -p "발견한 문제를 수정해 줘" /path/to/project
+loongcode -c -p "발견한 문제를 수정해 줘" /path/to/project
 ```
 
 ## 현재 상태
 
-**상태: 초기 실험적 개발 단계.** MiniCode는 현재 활발히 개발 중입니다. 현재 버전은 v0.1.0입니다. 포함된 내용은 [CHANGELOG.md](CHANGELOG.md)에서 확인하세요.
+**상태: 초기 실험적 개발 단계.** LoongCode는 현재 활발히 개발 중입니다. 현재 버전은 v0.1.0입니다. 포함된 내용은 [CHANGELOG.md](CHANGELOG.md)에서 확인하세요.
 
 ## 라이선스
 

@@ -1,4 +1,4 @@
-import type { ModelMessage, ModelToolOutput, ModelToolResult } from "@minicode/model"
+import type { ModelMessage, ModelToolOutput, ModelToolResult } from "@loongcode/model"
 import { estimateTokens } from "./budget"
 import type { ToolAffordances } from "../tools/types"
 
@@ -9,7 +9,7 @@ import type { ToolAffordances } from "../tools/types"
  * happen to exist today: a future tool that legitimately emits
  * `{ pruned: true }` as genuine `json` output cannot be misread as a marker.
  */
-const PRUNED_KEY = "minicodePruned"
+const PRUNED_KEY = "loongcodePruned"
 
 /** The only reason a result is reduced: the request does not fit its budget. */
 export type PruneReason = "request-over-budget"

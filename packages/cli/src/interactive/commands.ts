@@ -1,5 +1,5 @@
-import type { CompactionOutcome, Session } from "@minicode/agent"
-import type { ModelProtocol } from "@minicode/model"
+import type { CompactionOutcome, Session } from "@loongcode/agent"
+import type { ModelProtocol } from "@loongcode/model"
 
 /**
  * Outcome of a manual `/compact`, including cases the compaction layer cannot
@@ -15,7 +15,7 @@ export type CompactResult =
 
 /** Facade the commands act through — implemented by the TUI app. */
 export interface CommandContext {
-  agent(): import("@minicode/agent").MiniCode
+  agent(): import("@loongcode/agent").LoongCode
   session(): Session
   /** Replaces the active session (new/switch/fork/clone) and replays it. */
   setSession(session: Session): void
@@ -86,15 +86,15 @@ const MODEL_COMMIT = "\u0000model:commit"
 const MODEL_LIMITS = "\u0000model:limits"
 
 /**
- * MiniCode-managed limit defaults. The runtime needs *a* valid limit pair, not
+ * LoongCode-managed limit defaults. The runtime needs *a* valid limit pair, not
  * the model's true maximum (contextWindow is never sent to the provider; it
- * only sizes MiniCode's own input/output budgets). These conservative values
+ * only sizes LoongCode's own input/output budgets). These conservative values
  * let a user add a model without ever thinking about token limits.
  */
 const DEFAULT_CONTEXT_WINDOW = 128000
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192
 
-/** The two wire protocols MiniCode speaks, and the official endpoint each
+/** The two wire protocols LoongCode speaks, and the official endpoint each
  *  defaults to. Displayed as protocols, never as "providers". */
 const PROTOCOL_ITEMS: Array<{ value: string; label: string }> = [
   { value: "openai", label: "OpenAI-compatible" },
@@ -106,7 +106,7 @@ const OFFICIAL_ENDPOINTS: Record<ModelProtocol, string> = {
 }
 
 /** A user-facing message derived from a thrown value. Never contains secrets:
- *  ModelError messages carry no API key (see @minicode/model). */
+ *  ModelError messages carry no API key (see @loongcode/model). */
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -141,8 +141,8 @@ function deriveModelId(model: string): string {
 /**
  * Runs the guided add-model wizard.
  *
- * The normal path asks only for what MiniCode cannot reliably know — protocol,
- * endpoint, provider model, and API key. Context/output limits are MiniCode
+ * The normal path asks only for what LoongCode cannot reliably know — protocol,
+ * endpoint, provider model, and API key. Context/output limits are LoongCode
  * defaults, reachable only through the optional `Configure limits…` action.
  *
  * Returns a discriminated result so the caller can report cancellation,
@@ -378,7 +378,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "quit",
-    description: "Exit MiniCode",
+    description: "Exit LoongCode",
     execute(ctx) {
       ctx.quit()
     },

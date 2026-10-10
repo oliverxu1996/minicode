@@ -8,7 +8,7 @@ import { truncateOutput } from "../../src/tools/truncate"
 const ctx = (cwd: string) => ({ cwd })
 
 function tempWorkspace(): { dir: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "minicode-tools-test-"))
+  const dir = mkdtempSync(join(tmpdir(), "loongcode-tools-test-"))
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
